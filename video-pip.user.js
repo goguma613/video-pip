@@ -2,7 +2,7 @@
 // @name         🎬 고화질 영상 PIP (Picture-in-Picture)
 // @name:en      HD Video Picture-in-Picture
 // @namespace    https://github.com/goguma613/video-pip
-// @version      1.0.1
+// @version      1.0.2
 // @description  영상을 항상 위에 뜨는 작은 창으로. Document PiP로 원본 화질 그대로 유지 + 커스텀 컨트롤(속도/볼륨/필터/줌·회전/스크린샷), 상황별 프리셋, 자동 PIP, 단축키, 사이트별 설정 기억.
 // @description:en  Pop any video into an always-on-top window at original quality with custom controls, presets, auto-PiP, hotkeys and per-site memory (Document Picture-in-Picture).
 // @author       goguma613
@@ -131,6 +131,27 @@
     let state = JSON.parse(JSON.stringify(DEFAULTS));
     let saveTimer = null;
 
+    // 손상/구버전 값 방어: 타입·범위 정규화
+    function sanitize(s) {
+      const num = (v, d) => (typeof v === 'number' && isFinite(v)) ? v : d;
+      s.defaultRate = clamp(num(s.defaultRate, 1), MIN_RATE, MAX_RATE);
+      s.seekStep = clamp(num(s.seekStep, 5), 1, 60);
+      s.zoom = clamp(num(s.zoom, 1), 1, 3);
+      s.rotate = ((Math.round(num(s.rotate, 0) / 90) * 90) % 360 + 360) % 360;
+      if (s.fit !== 'contain' && s.fit !== 'cover') s.fit = 'contain';
+      const f = s.filters || {};
+      s.filters = {
+        brightness: clamp(num(f.brightness, 100), 0, 300),
+        contrast: clamp(num(f.contrast, 100), 0, 300),
+        saturate: clamp(num(f.saturate, 100), 0, 300),
+      };
+      const ps = s.pipSize || {};
+      s.pipSize = { w: clamp(num(ps.w, 480) | 0, 200, 1920), h: clamp(num(ps.h, 270) | 0, 120, 1080) };
+      if (!s.hotkeys || typeof s.hotkeys !== 'object') s.hotkeys = Object.assign({}, DEFAULTS.hotkeys);
+      if (!PRESETS[s.activePreset]) s.activePreset = 'basic';
+      return s;
+    }
+
     function load() {
       try {
         const raw = localStorage.getItem(KEY);
@@ -142,6 +163,7 @@
           state.pipSize = Object.assign({}, DEFAULTS.pipSize, parsed.pipSize);
         }
       } catch (e) { console.warn('[PIP] 설정 로드 실패:', e); }
+      sanitize(state);
       return state;
     }
     function persist() {
@@ -314,7 +336,8 @@
           const w = clamp(cfg.pipSize.w | 0, 200, 1920);
           const h = clamp(cfg.pipSize.h | 0, 120, 1080);
           const pipWin = await documentPictureInPicture.requestWindow({ width: w, height: h });
-          mountDoc(pipWin, video, cfg);
+          try { mountDoc(pipWin, video, cfg); }
+          catch (err) { console.error('[PIP] PiP 구성 실패, 복원 시도:', err); try { restore(); } catch (e2) {} try { pipWin.close(); } catch (e2) {} }
           return;
         } catch (e) {
           console.warn('[PIP] Document PiP 실패, 레거시 시도:', e && e.message);
@@ -353,18 +376,20 @@
         pipWin.document.head.appendChild(st);
       }
 
-      // 3) 스테이지 + 컨트롤 구성 후 실제 video 이동
+      // 3) 스테이지/컨트롤 구성(이 시점엔 video가 아직 원위치)
       const ctrl = buildStage(pipWin, video, cfg);
+
+      // 4) current·복원 핸들러를 video 이동 "전에" 등록(구성 중 throw 대비)
+      current = { mode: 'doc', win: pipWin, video, origin, ctrl };
+      pipWin.addEventListener('pagehide', () => restore(), { once: true });
+
+      // 5) 실제 video를 PiP 창으로 이동
       video.classList.add('vpip-video');
       ctrl.slot.appendChild(video); // ★ 원본 video를 PiP 창으로 이동
       video.playbackRate = cfg.defaultRate;
       try { video.preservesPitch = cfg.preservePitch; } catch (e) {}
       FilterEngine.apply(video, cfg);
 
-      current = { mode: 'doc', win: pipWin, video, origin, ctrl };
-
-      // 4) 닫힘 시 복원(단일 진입점)
-      pipWin.addEventListener('pagehide', () => restore(), { once: true });
       notify();
     }
 
@@ -412,7 +437,9 @@
       stage.appendChild(overlay);
       doc.body.appendChild(stage);
 
-      const ctrl = { slot, overlay, playC, playB, time, seek, track, played, buffered, thumb, tip, spd, vol, muteB };
+      const vListeners = [];
+      const onV = (type, fn) => { video.addEventListener(type, fn); vListeners.push([type, fn]); };
+      const ctrl = { slot, overlay, playC, playB, time, seek, track, played, buffered, thumb, tip, spd, vol, muteB, vListeners };
 
       // ── 이벤트 ──
       const togglePlay = () => { video.paused ? video.play() : video.pause(); };
@@ -462,6 +489,8 @@
       const endSeek = () => { seeking = false; };
       seek.addEventListener('pointerup', endSeek);
       seek.addEventListener('pointercancel', endSeek);
+      seek.addEventListener('lostpointercapture', endSeek);
+      pipWin.addEventListener('pointerup', endSeek);
 
       // 영상 빈 영역 단일클릭 = 재생토글 / 더블클릭 = 크기 토글 (컨트롤 버튼 클릭은 제외)
       let clickTimer = null;
@@ -490,15 +519,15 @@
       stage.addEventListener('pointermove', showControls);
       stage.addEventListener('pointerenter', showControls);
       stage.addEventListener('pointerleave', () => { if (!video.paused && !seeking) overlay.classList.remove('show'); });
-      video.addEventListener('pause', () => overlay.classList.add('show'));
+      onV('pause', () => overlay.classList.add('show'));
       showControls();
 
       // 상태 동기화
       const syncPlay = () => { const t = video.paused ? '▶' : '⏸'; playC.textContent = t; playB.textContent = t; };
       const syncVol = () => { muteB.textContent = video.muted || video.volume === 0 ? '🔇' : '🔊'; };
-      video.addEventListener('play', syncPlay);
-      video.addEventListener('pause', syncPlay);
-      video.addEventListener('volumechange', () => { syncVol(); vol.value = String(Math.round(video.volume * 100)); });
+      onV('play', syncPlay);
+      onV('pause', syncPlay);
+      onV('volumechange', () => { syncVol(); vol.value = String(Math.round(video.volume * 100)); });
       syncPlay(); syncVol();
 
       // 진행 업데이트 루프(PiP 창 rAF — 닫히면 자동 종료)
@@ -579,6 +608,9 @@
       if (!current || current.mode !== 'doc') { current = null; notify(); return; }
       const { video, origin } = current;
       try {
+        if (current.ctrl && current.ctrl.vListeners) {
+          current.ctrl.vListeners.forEach(([type, fn]) => video.removeEventListener(type, fn));
+        }
         video.classList.remove('vpip-video');
         FilterEngine.clear(video);
         if (origin.anchor && origin.anchor.parentNode) {
@@ -614,15 +646,16 @@
       if (current.video && current.video.isConnected) return; // 기존이 살아있으면 유지
       const oldT = current.video ? current.video.currentTime : 0;
       const cfg = ConfigManager.get();
+      // ★ 옮기기 "전에" 새 원위치(anchor)를 DOM에 삽입하고 인라인 스타일 스냅샷 저장 (복원 보장)
+      const anchor = document.createComment('vpip-anchor');
+      if (newVideo.parentNode) newVideo.parentNode.insertBefore(anchor, newVideo);
+      current.origin = { anchor, parent: anchor.parentNode || document.body, styleSnap: newVideo.getAttribute('style') };
       newVideo.classList.add('vpip-video');
       current.ctrl.slot.appendChild(newVideo);
       try { newVideo.currentTime = oldT; } catch (e) {}
       newVideo.playbackRate = cfg.defaultRate;
       FilterEngine.apply(newVideo, cfg);
-      // 새 원위치 기억
-      const anchor = document.createComment('vpip-anchor');
       current.video = newVideo;
-      current.origin = { anchor, parent: newVideo.parentNode || document.body, styleSnap: null };
     }
 
     return { enter, exit, toggle, isActive, getVideo, setOnStateChange, tryResize, onActiveVideoChanged, screenshot, cycleRate, nudgeRate, get isAuto() { return autoEntered; } };
@@ -790,8 +823,9 @@
       .pipbtn{width:100%;height:44px;border:none;border-radius:10px;cursor:pointer;background:#4f9dff;color:#fff;
         font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:8px;}
       .pipbtn:hover{filter:brightness(1.08);}
-      .pipbtn.on{background:rgba(255,255,255,.10);}
-      .pipbtn.on .dot{width:8px;height:8px;border-radius:50%;background:#3ddc84;}
+      .pipbtn.on{background:rgba(61,220,132,.16);}
+      .pipbtn .dot{display:none;}
+      .pipbtn.on .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#3ddc84;}
       .toggle{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12px;}
       .toggle .lbl{flex:1;}
       .sw{width:40px;height:22px;border-radius:999px;background:rgba(255,255,255,.18);position:relative;cursor:pointer;transition:background .15s;}
@@ -849,7 +883,7 @@
       // 1존: PIP 켜기 + 자동
       const pipDot = el(d, 'span', { class: 'dot' });
       const pipLabel = el(d, 'span', { text: 'PIP 켜기' });
-      const pipBtn = el(d, 'button', { class: 'pipbtn' }, [el(d, 'span', { text: '📺' }), pipLabel]);
+      const pipBtn = el(d, 'button', { class: 'pipbtn' }, [pipDot, el(d, 'span', { text: '📺' }), pipLabel]);
       const autoSw = el(d, 'div', { class: 'sw' + (cfg.autoPip ? ' on' : '') });
       const autoRow = el(d, 'div', { class: 'toggle' }, [el(d, 'span', { class: 'lbl', text: '🤖 자동 PIP (탭전환·스크롤)' }), autoSw]);
 

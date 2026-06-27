@@ -9,7 +9,9 @@
 - **원본 화질 유지** — 다운스케일·재인코딩 없이 디코딩 중인 영상 그대로. 작은 창이어도 화질 손실 0
 - **커스텀 컨트롤** — PIP 창 안에 재생/시크/볼륨/속도/스크린샷을 직접 그림 (마우스 올리면 등장, 빠지면 사라짐)
 - **원클릭 상황별 프리셋** — 🎬기본 / 📞통화옆 / 📖논문 / 🎮공략 / 🎧음악 / 🌙야간 (창 크기·속도·필터 묶음을 한 번에)
-- **자동 PIP** — 탭을 전환하거나 영상이 화면 밖으로 스크롤되면 자동으로 PIP 제안
+- **스크롤 자동 미니플레이어** — 영상이 화면 밖으로 스크롤되면 **즉시 떠다니는 미니창으로 따라옴**(제스처 없이 완전 자동, 모든 브라우저). 미니창의 `⤢`를 누르면 고화질 Document PIP로 승격. 영상 위치로 다시 스크롤하면 알아서 제자리로
+- **탭 전환 자동 PIP** — 다른 탭으로 가면 MediaSession으로 OS PIP가 자동으로 뜸(돌아오면 자동 복귀)
+- **PIP 창 안 미니 설정 ⚙️ + 도움말 ❓** — 창을 떠나지 않고 배속·밝기·대비·채도·회전·반전을 바로 조절, `?`로 단축키 도움말
 - **전문가 옵션** — 재생 속도(0.25~4x, 음정 보존), 줌·회전·채움, 밝기/대비/채도 필터, 야간 보정, **화면 디밍(투명도)**
 - **자막 따라오기** — 사이트 자막(유튜브 CC 등)을 PIP 창으로 가져와 표시, 크기·위치·배경 조절
 - **슬립 타이머** — 15/30/60분 후 자동 일시정지 또는 "영상 끝나면 닫기"
@@ -54,7 +56,7 @@
 | `Space` `K` | 재생·일시정지 | `M` | 음소거 |
 | `← / →` | 5초 이동 | `[ / ]` `=` | 배속 −/+ · 리셋 |
 | `J / L` | 10초 이동 | `R` `F` `S` | 회전 · 크기 · 스크린샷 |
-| | | `Esc` | 닫기 |
+| `?` | 단축키 도움말 | `Esc` | 닫기 |
 > 휠 = 볼륨 ±5%, `Shift`+휠 = 배속 ±0.1
 
 ## ⚠️ 지원/미지원
@@ -71,7 +73,8 @@
 ## 🛠 만든 사람을 위한 메모
 
 - 코드는 단일 파일 `video-pip.user.js` 안에 모듈로 분리되어 있습니다:
-  `ConfigManager / VideoObserver / FilterEngine / PipController(핵심) / HotkeyManager / AutoPipManager / Toast / UIManager`
+  `ConfigManager / VideoObserver / FilterEngine / SubtitleEngine / SleepTimer / PipController(핵심) / MiniPlayer / HotkeyManager / AutoPipManager / Toast / UIManager`
+- **자동 PIP 제스처 우회**: 브라우저는 PIP API 진입에 사용자 제스처를 요구하므로, 스크롤 이탈은 PIP API 대신 **원본 페이지 안에서 `<video>`를 `position:fixed` 미니창으로 이동**(MiniPlayer, 제스처 불필요)하고, 탭 전환은 **MediaSession `enterpictureinpicture`** 핸들러로 OS가 자동 진입하게 합니다.
 - 핵심: **Document PiP API**로 원본 `<video>` 노드를 PiP 창으로 이동(원본 해상도 유지) + 자리표시자 주석 노드로 원위치 복원.
 - 배포: 저장소를 **공개**로 두고 코드 수정 → `@version` 올림 → push 하면 자동 반영됩니다.
 - `@updateURL` / `@downloadURL` / 설치 링크 안의 `goguma613/video-pip` 를 실제 GitHub 사용자명/저장소명으로 바꿔주세요.

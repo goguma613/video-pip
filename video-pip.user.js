@@ -2,8 +2,8 @@
 // @name         🎬 고화질 영상 PIP (Picture-in-Picture)
 // @name:en      HD Video Picture-in-Picture
 // @namespace    https://github.com/goguma613/video-pip
-// @version      1.1.0
-// @description  영상을 항상 위에 뜨는 작은 창으로. Document PiP로 원본 화질 그대로 유지 + 커스텀 컨트롤(속도/볼륨/필터/줌·회전/스크린샷), 상황별 프리셋, 자동 PIP, 단축키, 사이트별 설정 기억.
+// @version      1.2.0
+// @description  영상을 항상 위에 뜨는 작은 창으로. Document PiP로 원본 화질 그대로 유지 + 커스텀 컨트롤(속도/볼륨/필터/줌·회전/스크린샷), 스크롤 시 자동 미니플레이어, 탭전환 자동 PIP(MediaSession), 미니 설정 팝오버, 상황별 프리셋, 단축키, 사이트별 설정 기억.
 // @description:en  Pop any video into an always-on-top window at original quality with custom controls, presets, auto-PiP, hotkeys and per-site memory (Document Picture-in-Picture).
 // @author       goguma613
 // @match        *://*.youtube.com/*
@@ -32,8 +32,9 @@
  *   VideoObserver   - MutationObserver + yt-navigate-finish로 video 등장/교체 감지, 대상 선택
  *   FilterEngine    - 밝기/대비/채도 + 줌/회전/미러를 video에 적용
  *   PipController   - ★핵심: Document PiP / 레거시 분기, video 이동·복원, PiP 창 컨트롤
+ *   MiniPlayer      - 스크롤 이탈 시 원본 페이지 안에서 video를 떠다니는 미니창으로(제스처 불필요)
  *   HotkeyManager   - 단축키(설정 기반), YT 단축키 충돌 회피
- *   AutoPipManager  - 탭 전환 / 뷰포트 이탈 시 자동 PIP(제스처 제약은 토스트로 우회)
+ *   AutoPipManager  - 스크롤 이탈→미니플레이어(자동) / 탭 전환→MediaSession 자동 PIP
  *   UIManager       - 원본 페이지 Shadow DOM 플로팅 패널(진입·설정), 드래그/핀/페이드/온보딩
  *
  * 핵심 결정:
@@ -75,8 +76,9 @@
     pipSize: { w: 480, h: 270 },
     activePreset: 'basic',
     // 자동 PIP
-    autoPip: false,        // 마스터(탭전환 + 뷰포트 이탈)
+    autoPip: false,        // 마스터(탭전환 자동PIP + 스크롤 이탈 미니플레이어)
     restoreOnReturn: true,
+    miniCorner: 'br',      // 미니플레이어 스냅 위치: tl | tr | bl | br
     // 단축키 (정규화된 콤보)
     hotkeys: {
       togglePip: 'Alt+p', speedDown: '[', speedUp: ']',
@@ -159,6 +161,7 @@
       };
       if (!s.hotkeys || typeof s.hotkeys !== 'object') s.hotkeys = Object.assign({}, DEFAULTS.hotkeys);
       if (!PRESETS[s.activePreset]) s.activePreset = 'basic';
+      if (['tl', 'tr', 'bl', 'br'].indexOf(s.miniCorner) === -1) s.miniCorner = 'br';
       return s;
     }
 
@@ -241,6 +244,8 @@
         setTimeout(() => onChange && onChange(pickActive()), 400);
       });
       document.addEventListener('DOMContentLoaded', () => onChange && onChange(pickActive()), { once: true });
+      // 정적 <video>가 뒤늦게(또는 DOM 변화 없이) 재생을 시작하는 사이트 대응 → 재생 시점에 재바인딩
+      document.addEventListener('play', () => onChange && onChange(pickActive()), { capture: true });
     }
 
     return { start, pickActive, list, setManual };
@@ -441,6 +446,26 @@
       .stage.compact .center{display:none;}
       .stage.compact .opt-hide{display:none;}
       .stage.compact .vol{display:none;}
+      .pop{position:absolute;right:10px;bottom:54px;width:210px;background:rgba(22,26,34,.97);
+        border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:11px;display:none;z-index:10;
+        box-shadow:0 8px 24px rgba(0,0,0,.5);}
+      .pop.show{display:block;}
+      .pop .pr{display:flex;align-items:center;gap:8px;margin:8px 0;font-size:11px;}
+      .pop .pr .pl{width:34px;opacity:.7;}
+      .pop .pr input[type=range]{-webkit-appearance:none;appearance:none;flex:1;height:4px;border-radius:4px;
+        background:rgba(255,255,255,.18);outline:none;}
+      .pop .pr input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:#4f9dff;cursor:pointer;}
+      .pop .pr .pv{width:44px;text-align:right;color:#4f9dff;font-weight:700;}
+      .pop .prow{display:flex;gap:5px;margin-top:9px;}
+      .pop .pbtn2{flex:1;padding:6px 0;border:none;border-radius:7px;background:rgba(255,255,255,.08);color:#e9eef5;font-size:11px;cursor:pointer;}
+      .pop .pbtn2:hover{background:rgba(255,255,255,.16);}
+      .pop .pbtn2.active{background:#4f9dff;color:#fff;}
+      .help{position:absolute;inset:0;background:rgba(0,0,0,.85);display:none;z-index:20;padding:18px 20px;overflow:auto;}
+      .help.show{display:block;}
+      .help h4{font-size:13px;margin:0 0 10px;color:#4f9dff;}
+      .help .hk{font-size:12px;line-height:1.95;}
+      .help .hk b{display:inline-block;min-width:78px;color:#4f9dff;}
+      .help .hclose{position:absolute;top:10px;right:12px;}
     `;
 
     function isActive() { return !!current; }
@@ -450,9 +475,10 @@
 
     // ── 진입 ──
     async function enter(video, opts) {
-      video = video || VideoObserver.pickActive();
+      video = video || MiniPlayer.getVideo() || VideoObserver.pickActive();
       if (!video) { Toast.show('🔍 이 페이지에서 영상을 찾지 못했어요. 영상을 한 번 재생한 뒤 다시 시도해 주세요.'); return; }
       if (current) await exit();
+      try { MiniPlayer.exit(); } catch (e) {} // 미니플레이어가 잡고 있던 video를 원위치로 회수 후 진입
       autoEntered = !!(opts && opts.auto);
       const cfg = ConfigManager.get();
 
@@ -529,8 +555,9 @@
       const ttl = el(doc, 'span', { class: 'ttl', text: document.title || location.hostname });
       const homeBtn = el(doc, 'button', { class: 'ibtn', title: '페이지로 돌아가기', 'aria-label': '페이지로 돌아가기', text: '🏠' });
       const sizeBtn = el(doc, 'button', { class: 'ibtn', title: '창 크기 전환', 'aria-label': '창 크기 전환', text: '⤢' });
+      const helpBtn = el(doc, 'button', { class: 'ibtn', title: '도움말 (?)', 'aria-label': '도움말', text: '❓' });
       const closeBtn = el(doc, 'button', { class: 'ibtn close', title: '닫기 (Esc)', 'aria-label': '닫기', text: '✕' });
-      const topbar = el(doc, 'div', { class: 'topbar' }, [ttl, sizeBtn, homeBtn, closeBtn]);
+      const topbar = el(doc, 'div', { class: 'topbar' }, [ttl, sizeBtn, helpBtn, homeBtn, closeBtn]);
 
       // 중앙
       const backBtn = el(doc, 'button', { class: 'cbtn', title: '10초 뒤로', 'aria-label': '10초 뒤로', text: '⟲' });
@@ -554,15 +581,20 @@
       const spd = el(doc, 'button', { class: 'spd', title: '재생 속도 (클릭하여 순환)', 'aria-label': '재생 속도', text: cfg.defaultRate.toFixed(2) + 'x' });
       const shot = el(doc, 'button', { class: 'ibtn opt-hide', title: '스크린샷 (S)', 'aria-label': '스크린샷', text: '📷' });
       const rotB = el(doc, 'button', { class: 'ibtn opt-hide', title: '90° 회전 (R)', 'aria-label': '90도 회전', text: '🔄' });
-      const row = el(doc, 'div', { class: 'row' }, [playB, time, el(doc, 'span', { class: 'grow' }), muteB, vol, spd, rotB, shot]);
+      const gearB = el(doc, 'button', { class: 'ibtn opt-hide', title: '설정 (배속·필터·회전)', 'aria-label': '설정', text: '⚙️' });
+      const row = el(doc, 'div', { class: 'row' }, [playB, time, el(doc, 'span', { class: 'grow' }), muteB, vol, spd, rotB, shot, gearB]);
 
       const bottom = el(doc, 'div', { class: 'bottom' }, [seek, row]);
+      const pop = buildPopover(doc, video);
+      const help = buildHelp(doc);
       const subs = el(doc, 'div', { class: 'subs' + (cfg.subtitles.position === 'top' ? ' top' : '') });
       const overlay = el(doc, 'div', { class: 'overlay' }, [topbar, center, bottom]);
 
       stage.appendChild(slot);
       stage.appendChild(subs);
       stage.appendChild(overlay);
+      stage.appendChild(pop.root);
+      stage.appendChild(help.root);
       doc.body.appendChild(stage);
 
       // 창 너비에 따른 컨트롤 단계 축소
@@ -594,6 +626,9 @@
         FilterEngine.apply(video, ConfigManager.get());
       });
       shot.addEventListener('click', () => screenshot(video));
+      gearB.addEventListener('click', (e) => { e.stopPropagation(); help.root.classList.remove('show'); pop.root.classList.toggle('show'); pop.sync(); });
+      helpBtn.addEventListener('click', (e) => { e.stopPropagation(); pop.root.classList.remove('show'); help.root.classList.toggle('show'); });
+      help.closeBtn.addEventListener('click', () => help.root.classList.remove('show'));
       muteB.addEventListener('click', () => { video.muted = !video.muted; });
       vol.addEventListener('input', () => { video.volume = vol.value / 100; video.muted = false; });
       spd.addEventListener('click', () => cycleRate(video));
@@ -698,9 +733,72 @@
 
       // PiP 창 자체 단축키
       HotkeyManager.attach(doc);
-      doc.addEventListener('keydown', (e) => { if (e.key === 'Escape') { try { pipWin.close(); } catch (err) {} } });
+      doc.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          if (pop.root.classList.contains('show') || help.root.classList.contains('show')) {
+            pop.root.classList.remove('show'); help.root.classList.remove('show'); e.stopImmediatePropagation(); return;
+          }
+          try { pipWin.close(); } catch (err) {}
+        } else if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
+          pop.root.classList.remove('show'); help.root.classList.toggle('show'); e.preventDefault();
+        }
+      });
 
       return ctrl;
+    }
+
+    // PiP 창 안 미니 설정 팝오버(배속·밝기·대비·채도·회전·반전)
+    function buildPopover(doc, video) {
+      const cfg = ConfigManager.get();
+      const apply = () => FilterEngine.apply(video, ConfigManager.get());
+      function prow(label, min, max, step, val, fmt, onInput) {
+        const input = el(doc, 'input', { type: 'range', min: String(min), max: String(max), step: String(step), value: String(val), 'aria-label': label });
+        const pv = el(doc, 'span', { class: 'pv', text: fmt(val) });
+        input.addEventListener('input', () => { const v = parseFloat(input.value); pv.textContent = fmt(v); onInput(v); });
+        const root = el(doc, 'div', { class: 'pr' }, [el(doc, 'span', { class: 'pl', text: label }), input, pv]);
+        return { root, set(v) { input.value = String(v); pv.textContent = fmt(v); } };
+      }
+      const rate = prow('배속', MIN_RATE, MAX_RATE, 0.05, video.playbackRate, (v) => v.toFixed(2) + 'x', (v) => { video.playbackRate = v; ConfigManager.set({ defaultRate: v }); });
+      const bri = prow('밝기', 50, 150, 1, cfg.filters.brightness, (v) => v + '%', (v) => { ConfigManager.setFilters({ brightness: v }); apply(); });
+      const con = prow('대비', 50, 150, 1, cfg.filters.contrast, (v) => v + '%', (v) => { ConfigManager.setFilters({ contrast: v }); apply(); });
+      const sat = prow('채도', 0, 200, 1, cfg.filters.saturate, (v) => v + '%', (v) => { ConfigManager.setFilters({ saturate: v }); apply(); });
+      const rotBtn = el(doc, 'button', { class: 'pbtn2', text: '🔄 회전' });
+      const mirBtn = el(doc, 'button', { class: 'pbtn2' + (cfg.mirror ? ' active' : ''), text: '↔ 반전' });
+      const resetBtn = el(doc, 'button', { class: 'pbtn2', text: '↺ 초기화' });
+      rotBtn.addEventListener('click', () => { const c = ConfigManager.get(); ConfigManager.set({ rotate: (c.rotate + 90) % 360 }); apply(); });
+      mirBtn.addEventListener('click', () => { const c = ConfigManager.get(); ConfigManager.set({ mirror: !c.mirror }); mirBtn.classList.toggle('active', !c.mirror); apply(); });
+      resetBtn.addEventListener('click', () => {
+        ConfigManager.set({ rotate: 0, mirror: false, zoom: 1 });
+        ConfigManager.setFilters({ brightness: 100, contrast: 100, saturate: 100 });
+        bri.set(100); con.set(100); sat.set(100); mirBtn.classList.remove('active'); apply();
+      });
+      const prowBtns = el(doc, 'div', { class: 'prow' }, [rotBtn, mirBtn, resetBtn]);
+      const root = el(doc, 'div', { class: 'pop' }, [rate.root, bri.root, con.root, sat.root, prowBtns]);
+      root.addEventListener('click', (e) => e.stopPropagation());
+      // 외부 상태 변화(휠 배속 등) 반영용
+      function sync() {
+        const c = ConfigManager.get();
+        rate.set(video.playbackRate);
+        bri.set(c.filters.brightness); con.set(c.filters.contrast); sat.set(c.filters.saturate);
+        mirBtn.classList.toggle('active', !!c.mirror);
+      }
+      return { root, sync };
+    }
+
+    // 단축키 도움말 오버레이
+    function buildHelp(doc) {
+      const closeBtn = el(doc, 'button', { class: 'ibtn close hclose', title: '닫기', 'aria-label': '도움말 닫기', text: '✕' });
+      const keyData = [
+        ['Space / K', '재생·일시정지'], ['← / →', '5초 이동'], ['J / L', '10초 이동'],
+        ['↑ / ↓', '볼륨'], ['M', '음소거'], ['[ / ] / =', '배속 −/＋ · 리셋'],
+        ['R / F / S', '회전 · 크기 · 스크린샷'], ['휠', '볼륨'], ['Shift+휠', '배속'],
+        ['?', '이 도움말'], ['Esc', '닫기'],
+      ];
+      const hk = el(doc, 'div', { class: 'hk' });
+      keyData.forEach(([k, d]) => hk.appendChild(el(doc, 'div', {}, [el(doc, 'b', { text: k }), el(doc, 'span', { text: ' ' + d })])));
+      const root = el(doc, 'div', { class: 'help' }, [closeBtn, el(doc, 'h4', { text: '⌨️ 단축키' }), hk]);
+      root.addEventListener('click', (e) => { if (e.target === root) root.classList.remove('show'); });
+      return { root, closeBtn };
     }
 
     function cycleRate(video) {
@@ -796,6 +894,221 @@
   })();
 
   // ─────────────────────────────────────────────────────────────
+  // MiniPlayer — 스크롤 이탈 시 원본 페이지 안에서 video를 떠다니는 미니창으로
+  //   PIP API(제스처 필요)와 달리 DOM 이동이라 "완전 자동" 가능. 모든 브라우저 동작.
+  //   원위치엔 같은 크기 spacer를 남겨 레이아웃 보존 + 재진입 감지(spacer가 다시 보이면 복원).
+  // ─────────────────────────────────────────────────────────────
+  const MiniPlayer = (function () {
+    let host, shadow, wrap, slot, subsEl, ov, playC, played, timeEl, current = null; // {video, origin, raf, vL, io}
+    let dragging = false;
+
+    const MINI_CSS = `
+      :host{all:initial;}
+      .mwrap{position:fixed;z-index:2147483646;width:336px;height:189px;
+        background:#000;border-radius:12px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,.55);
+        font-family:'Malgun Gothic',system-ui,-apple-system,sans-serif;color:#e9eef5;
+        opacity:0;transform:translateY(8px);transition:opacity .2s ease,transform .2s ease;}
+      .mwrap.show{opacity:1;transform:none;}
+      .mwrap.dragging{transition:none;cursor:grabbing;}
+      .mslot{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#000;}
+      .vpip-video{position:static!important;width:100%!important;height:100%!important;max-width:none!important;
+        max-height:none!important;inset:auto!important;left:auto!important;top:auto!important;right:auto!important;
+        bottom:auto!important;margin:0!important;}
+      .mov{position:absolute;inset:0;opacity:0;transition:opacity .14s;pointer-events:none;}
+      .mwrap:hover .mov,.mwrap.paused .mov{opacity:1;pointer-events:auto;}
+      .mtop{position:absolute;top:0;left:0;right:0;height:30px;display:flex;align-items:center;gap:2px;padding:0 5px;
+        background:linear-gradient(180deg,rgba(0,0,0,.7),transparent);cursor:grab;}
+      .mttl{flex:1;font-size:10px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.85;padding-left:3px;}
+      .mb{width:24px;height:24px;border:none;border-radius:6px;background:transparent;color:#e9eef5;font-size:13px;cursor:pointer;
+        display:flex;align-items:center;justify-content:center;line-height:1;flex:none;}
+      .mb:hover{background:rgba(255,255,255,.16);color:#4f9dff;}
+      .mb.x:hover{color:#ff5b5b;}
+      .mb.up:hover{color:#3ddc84;}
+      .mcenter{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;}
+      .mplay{width:48px;height:48px;border:none;border-radius:50%;background:rgba(20,24,32,.5);
+        color:#fff;font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+      .mplay:hover{background:rgba(79,157,255,.85);}
+      .mbot{position:absolute;left:0;right:0;bottom:0;padding:0 9px 7px;background:linear-gradient(0deg,rgba(0,0,0,.72),transparent);}
+      .mseek{position:relative;height:14px;display:flex;align-items:center;cursor:pointer;}
+      .mtrack{position:relative;height:3px;width:100%;border-radius:3px;background:rgba(255,255,255,.22);}
+      .mseek:hover .mtrack{height:5px;}
+      .mplayed{position:absolute;left:0;top:0;height:100%;background:#4f9dff;width:0;border-radius:3px;}
+      .mtime{font-size:10px;color:#cfd8e3;padding:1px 0 0;}
+      .msubs{position:absolute;left:50%;bottom:15%;transform:translateX(-50%);max-width:92%;text-align:center;color:#fff;
+        font-weight:600;line-height:1.3;text-shadow:0 1px 3px rgba(0,0,0,.95);white-space:pre-wrap;pointer-events:none;font-size:12px;visibility:hidden;}
+      .msubs.top{bottom:auto;top:9%;}
+      button:focus-visible{outline:2px solid #4f9dff;outline-offset:1px;}
+    `;
+
+    function ensure() {
+      if (host) return;
+      host = document.createElement('div');
+      host.id = '__video_pip_mini_host';
+      shadow = host.attachShadow({ mode: 'open' });
+      const st = document.createElement('style'); st.textContent = MINI_CSS; shadow.appendChild(st);
+
+      const d = document;
+      slot = el(d, 'div', { class: 'mslot' });
+      subsEl = el(d, 'div', { class: 'msubs' });
+
+      const ttl = el(d, 'span', { class: 'mttl', text: document.title || location.hostname });
+      const upBtn = el(d, 'button', { class: 'mb up', title: '진짜 PIP 창으로 (원본 화질·풀 컨트롤)', 'aria-label': 'PIP로 전환', text: '⤢' });
+      const homeBtn = el(d, 'button', { class: 'mb', title: '원래 위치로 돌아가기', 'aria-label': '원위치 복귀', text: '🏠' });
+      const closeBtn = el(d, 'button', { class: 'mb x', title: '닫기', 'aria-label': '닫기', text: '✕' });
+      const top = el(d, 'div', { class: 'mtop' }, [ttl, upBtn, homeBtn, closeBtn]);
+
+      playC = el(d, 'button', { class: 'mplay', title: '재생/일시정지', 'aria-label': '재생/일시정지', text: '⏸' });
+      const center = el(d, 'div', { class: 'mcenter' }, [playC]);
+
+      played = el(d, 'div', { class: 'mplayed' });
+      const track = el(d, 'div', { class: 'mtrack' }, [played]);
+      const seek = el(d, 'div', { class: 'mseek' }, [track]);
+      timeEl = el(d, 'span', { class: 'mtime', text: '0:00 / 0:00' });
+      const bot = el(d, 'div', { class: 'mbot' }, [seek, timeEl]);
+
+      ov = el(d, 'div', { class: 'mov' }, [top, center, bot]);
+      wrap = el(d, 'div', { class: 'mwrap' }, [slot, subsEl, ov]);
+      shadow.appendChild(wrap);
+      (document.body || document.documentElement).appendChild(host);
+
+      // 컨트롤 이벤트
+      const togglePlay = () => { const v = current && current.video; if (!v) return; v.paused ? v.play() : v.pause(); };
+      playC.addEventListener('click', togglePlay);
+      upBtn.addEventListener('click', () => { const v = current && current.video; if (v) PipController.enter(v); }); // 클릭=제스처 → Document PiP 승격
+      homeBtn.addEventListener('click', () => { // 원래 위치로 스크롤(안 그러면 자동PIP가 즉시 미니 재생성)
+        const sp = current && current.origin && current.origin.spacer;
+        if (sp && sp.scrollIntoView) { try { sp.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {} }
+        exit();
+      });
+      closeBtn.addEventListener('click', () => { const v = current && current.video; exit(); if (v) try { v.pause(); } catch (e) {} });
+      seek.addEventListener('pointerdown', (e) => {
+        const v = current && current.video; if (!v || !isFinite(v.duration)) return;
+        const r = track.getBoundingClientRect();
+        v.currentTime = clamp((e.clientX - r.left) / r.width, 0, 1) * v.duration;
+      });
+      makeDraggable(top);
+    }
+
+    function applyCorner() {
+      const c = ConfigManager.get().miniCorner;
+      wrap.style.top = wrap.style.bottom = wrap.style.left = wrap.style.right = 'auto';
+      const m = 18;
+      if (c[0] === 't') wrap.style.top = m + 'px'; else wrap.style.bottom = m + 'px';
+      if (c[1] === 'l') wrap.style.left = m + 'px'; else wrap.style.right = m + 'px';
+    }
+
+    function makeDraggable(handle) {
+      let sx, sy, ox, oy;
+      handle.addEventListener('pointerdown', (e) => {
+        if (e.target.closest('button')) return;
+        dragging = true; wrap.classList.add('dragging');
+        const r = wrap.getBoundingClientRect();
+        sx = e.clientX; sy = e.clientY; ox = r.left; oy = r.top;
+        wrap.style.top = oy + 'px'; wrap.style.left = ox + 'px'; wrap.style.right = 'auto'; wrap.style.bottom = 'auto';
+        try { handle.setPointerCapture(e.pointerId); } catch (er) {}
+      });
+      handle.addEventListener('pointermove', (e) => {
+        if (!dragging) return;
+        wrap.style.left = clamp(ox + e.clientX - sx, 0, innerWidth - wrap.offsetWidth) + 'px';
+        wrap.style.top = clamp(oy + e.clientY - sy, 0, innerHeight - wrap.offsetHeight) + 'px';
+      });
+      const end = () => {
+        if (!dragging) return;
+        dragging = false; wrap.classList.remove('dragging');
+        // 가장 가까운 코너로 스냅 + 저장
+        const r = wrap.getBoundingClientRect();
+        const corner = (r.top + r.height / 2 < innerHeight / 2 ? 't' : 'b') + (r.left + r.width / 2 < innerWidth / 2 ? 'l' : 'r');
+        ConfigManager.set({ miniCorner: corner });
+        applyCorner();
+      };
+      handle.addEventListener('pointerup', end);
+      handle.addEventListener('pointercancel', end);
+    }
+
+    function isActive() { return !!current; }
+    function getVideo() { return current ? current.video : null; }
+
+    function enter(video) {
+      if (current || PipController.isActive()) return;
+      video = video || VideoObserver.pickActive();
+      if (!video || !video.parentNode) return;
+      ensure();
+      const cfg = ConfigManager.get();
+
+      // 원위치 보존: 같은 크기 spacer를 끼워 레이아웃 유지 + 재진입 감지 타깃
+      const rect = video.getBoundingClientRect();
+      const spacer = document.createElement('div');
+      spacer.setAttribute('data-vpip-mini-spacer', '1');
+      spacer.style.cssText = 'width:' + Math.round(rect.width) + 'px;height:' + Math.round(rect.height) + 'px;';
+      video.parentNode.insertBefore(spacer, video);
+      const origin = { spacer, parent: video.parentNode, styleSnap: video.getAttribute('style') };
+
+      video.classList.add('vpip-video');
+      slot.appendChild(video); // ★ 원본 video를 미니창으로 이동(같은 document → 재생 유지)
+      try { video.preservesPitch = cfg.preservePitch; } catch (e) {}
+      FilterEngine.apply(video, cfg);
+      SubtitleEngine.start(video, subsEl, cfg);
+      subsEl.classList.toggle('top', cfg.subtitles.position === 'top');
+
+      current = { video, origin, raf: null, vL: [] };
+      applyCorner();
+      requestAnimationFrame(() => wrap.classList.add('show'));
+
+      const onV = (t, fn) => { video.addEventListener(t, fn); current.vL.push([t, fn]); };
+      const syncPlay = () => { const p = video.paused; playC.textContent = p ? '▶' : '⏸'; wrap.classList.toggle('paused', p); };
+      onV('play', syncPlay); onV('pause', syncPlay); syncPlay();
+
+      function tick() {
+        if (!current) return;
+        const dur = video.duration;
+        if (isFinite(dur) && dur > 0) {
+          played.style.width = (video.currentTime / dur * 100) + '%';
+          timeEl.textContent = fmtTime(video.currentTime) + ' / ' + fmtTime(dur);
+        } else { played.style.width = '100%'; timeEl.textContent = '● LIVE'; }
+        current.raf = requestAnimationFrame(tick);
+      }
+      current.raf = requestAnimationFrame(tick);
+
+      // 재진입 감지: spacer(원위치)가 다시 화면에 들어오면 자동 복원
+      try {
+        current.io = new IntersectionObserver((entries) => {
+          if (current && entries[0] && entries[0].intersectionRatio > 0.35) exit();
+        }, { threshold: [0, 0.35] });
+        current.io.observe(spacer);
+      } catch (e) {}
+
+      Toast.show('📺 미니플레이어로 따라갑니다 · ⤢ 누르면 고화질 PIP로');
+    }
+
+    function exit() {
+      if (!current) return;
+      const { video, origin, raf, vL, io } = current;
+      current = null;
+      if (raf) cancelAnimationFrame(raf);
+      if (io) try { io.disconnect(); } catch (e) {}
+      SubtitleEngine.stop();
+      if (vL) vL.forEach(([t, fn]) => { try { video.removeEventListener(t, fn); } catch (e) {} });
+      if (wrap) wrap.classList.remove('show', 'paused');
+      try {
+        video.classList.remove('vpip-video');
+        FilterEngine.clear(video);
+        if (origin.spacer && origin.spacer.parentNode) {
+          origin.spacer.parentNode.insertBefore(video, origin.spacer);
+          origin.spacer.remove();
+        } else if (origin.parent && origin.parent.isConnected) {
+          origin.parent.appendChild(video);
+        }
+        if (origin.styleSnap == null) video.removeAttribute('style');
+        else video.setAttribute('style', origin.styleSnap);
+      } catch (e) { console.warn('[PIP] 미니 복원 오류:', e); }
+    }
+
+    function restyle(cfg) { if (current) { FilterEngine.apply(current.video, cfg); subsEl.classList.toggle('top', cfg.subtitles.position === 'top'); } }
+
+    return { enter, exit, isActive, getVideo, restyle };
+  })();
+
+  // ─────────────────────────────────────────────────────────────
   // HotkeyManager — 단축키
   // ─────────────────────────────────────────────────────────────
   const HotkeyManager = (function () {
@@ -823,7 +1136,7 @@
       return m;
     }
     function run(action) {
-      const v = PipController.getVideo() || VideoObserver.pickActive();
+      const v = PipController.getVideo() || MiniPlayer.getVideo() || VideoObserver.pickActive();
       const cfg = ConfigManager.get();
       switch (action) {
         case 'togglePip': PipController.toggle(); return;
@@ -848,8 +1161,8 @@
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
       const action = keymap()[combo(e)];
       if (!action) return;
-      // PIP 비활성 시엔 togglePip만 동작(사이트 단축키 보존)
-      if (action !== 'togglePip' && !PipController.isActive()) return;
+      // PIP/미니 비활성 시엔 togglePip만 동작(사이트 단축키 보존)
+      if (action !== 'togglePip' && !PipController.isActive() && !MiniPlayer.isActive()) return;
       e.preventDefault();
       e.stopImmediatePropagation();
       run(action);
@@ -862,36 +1175,52 @@
   // AutoPipManager — 탭 전환 / 뷰포트 이탈 시 자동 PIP
   // ─────────────────────────────────────────────────────────────
   const AutoPipManager = (function () {
-    let io = null, observed = null;
+    let io = null, autoNative = false;
 
+    // 스크롤 이탈 → 미니플레이어(완전 자동, 제스처 불필요)
     function watch(video) {
-      if (io) io.disconnect();
+      if (io) { io.disconnect(); io = null; }
       if (!video) return;
-      observed = video;
       io = new IntersectionObserver((entries) => {
         const e = entries[0];
         const cfg = ConfigManager.get();
-        if (!cfg.autoPip || PipController.isActive()) return;
+        if (!cfg.autoPip) return;
+        if (PipController.isActive() || MiniPlayer.isActive()) return; // 이미 PIP/미니면 무시
         if (e.intersectionRatio === 0 && !video.paused && !video.ended) {
-          // 스크롤 이탈: 제스처 제약 → 클릭 가능한 토스트로 우회
-          Toast.show('📺 영상이 화면 밖으로 나갔어요. 눌러서 PIP로 계속 보기', () => PipController.enter(video));
+          MiniPlayer.enter(video);
         }
       }, { threshold: [0] });
       io.observe(video);
     }
 
+    // 탭 전환 → MediaSession 자동 PIP(Chrome이 제스처 없이 OS PIP를 띄워줌)
+    function setupMediaSession() {
+      if (!('mediaSession' in navigator) || !navigator.mediaSession.setActionHandler) return;
+      try {
+        navigator.mediaSession.setActionHandler('enterpictureinpicture', () => {
+          const cfg = ConfigManager.get();
+          const v = PipController.getVideo() || MiniPlayer.getVideo() || VideoObserver.pickActive();
+          if (!cfg.autoPip || !v || PipController.isActive()) return;
+          // 자동 진입은 제스처가 없어 Document PiP가 불가 → 네이티브 PIP 사용
+          if (document.pictureInPictureEnabled && !v.disablePictureInPicture && !document.pictureInPictureElement) {
+            v.requestPictureInPicture().then(() => {
+              autoNative = true;
+              v.addEventListener('leavepictureinpicture', () => { autoNative = false; }, { once: true });
+            }).catch(() => {});
+          }
+        });
+      } catch (e) { /* 일부 브라우저 미지원 */ }
+    }
+
     function start() {
-      document.addEventListener('visibilitychange', async () => {
+      setupMediaSession();
+      // 탭 복귀 시 자동으로 들어간 네이티브 PIP는 닫아 원위치 복귀
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) return;
         const cfg = ConfigManager.get();
-        const v = PipController.getVideo() || VideoObserver.pickActive();
-        if (document.hidden) {
-          if (cfg.autoPip && !PipController.isActive() && v && !v.paused) {
-            try { await PipController.enter(v, { auto: true }); } catch (e) {}
-          }
-        } else {
-          if (cfg.autoPip && cfg.restoreOnReturn && PipController.isActive() && PipController.isAuto) {
-            PipController.exit();
-          }
+        if (cfg.autoPip && cfg.restoreOnReturn && autoNative && document.pictureInPictureElement) {
+          document.exitPictureInPicture().catch(() => {});
+          autoNative = false;
         }
       });
     }
@@ -1021,7 +1350,7 @@
       const pipLabel = el(d, 'span', { text: 'PIP 켜기' });
       const pipBtn = el(d, 'button', { class: 'pipbtn' }, [pipDot, el(d, 'span', { text: '📺' }), pipLabel]);
       const autoSw = el(d, 'div', { class: 'sw' + (cfg.autoPip ? ' on' : '') });
-      const autoRow = el(d, 'div', { class: 'toggle' }, [el(d, 'span', { class: 'lbl', text: '🤖 자동 PIP (스크롤 시 알림)' }), autoSw]);
+      const autoRow = el(d, 'div', { class: 'toggle' }, [el(d, 'span', { class: 'lbl', text: '🤖 자동 PIP (스크롤=미니 · 탭전환=PIP)' }), autoSw]);
 
       // 2존: 프리셋
       const presetGrid = el(d, 'div', { class: 'grid' });
@@ -1065,12 +1394,13 @@
 
     function buildAdvanced(d, cfg) {
       const f = cfg.filters;
-      const apply = () => FilterEngine.apply(PipController.getVideo(), ConfigManager.get());
+      const liveVideo = () => PipController.getVideo() || MiniPlayer.getVideo();
+      const apply = () => FilterEngine.apply(liveVideo(), ConfigManager.get());
       const setSub = (patch) => { ConfigManager.set({ subtitles: Object.assign({}, ConfigManager.get().subtitles, patch) }); SubtitleEngine.restyle(ConfigManager.get()); };
 
       // 재생
       const rateCtl = slider(d, '배속', MIN_RATE, MAX_RATE, 0.05, cfg.defaultRate, (v) => v.toFixed(2) + 'x', (v) => {
-        ConfigManager.set({ defaultRate: v }); const vid = PipController.getVideo(); if (vid) vid.playbackRate = v;
+        ConfigManager.set({ defaultRate: v }); const vid = liveVideo(); if (vid) vid.playbackRate = v;
       });
       const grpPlay = group(d, '🔄 재생', [rateCtl.root]);
 
@@ -1172,8 +1502,10 @@
         if (next) {
           const v = VideoObserver.pickActive();
           Toast.show(v && !v.paused
-            ? '🤖 자동 PIP 켜짐 — 영상이 화면 밖으로 나가면 PIP 버튼을 띄워드려요.'
-            : '🤖 자동 PIP 켜짐 — 영상을 재생하면 화면을 벗어날 때 안내해요.');
+            ? '🤖 자동 PIP 켜짐 — 스크롤로 영상이 사라지면 미니플레이어로 따라가고, 탭을 바꾸면 PIP로 떠요.'
+            : '🤖 자동 PIP 켜짐 — 영상을 재생하면 스크롤 시 미니플레이어가 따라갑니다.');
+        } else {
+          MiniPlayer.exit();
         }
       });
       PRESET_KEYS.forEach((k) => els.presetBtns[k].addEventListener('click', () => applyPreset(k)));
@@ -1289,6 +1621,8 @@
   PipController.setOnStateChange((active) => UIManager.refreshState(active));
 
   VideoObserver.start((active) => {
+    // 미니플레이어가 잡고 있던 video가 SPA 전환으로 죽었으면 닫기
+    if (MiniPlayer.isActive()) { const mv = MiniPlayer.getVideo(); if (!mv || !mv.isConnected) MiniPlayer.exit(); }
     AutoPipManager.watch(active);
     PipController.onActiveVideoChanged(active);
     UIManager.refreshVideoSelector();

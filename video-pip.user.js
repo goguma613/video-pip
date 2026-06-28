@@ -2,7 +2,7 @@
 // @name         🎬 고화질 영상 PIP (Picture-in-Picture)
 // @name:en      HD Video Picture-in-Picture
 // @namespace    https://github.com/goguma613/video-pip
-// @version      1.2.4
+// @version      1.2.5
 // @description  영상을 항상 위에 뜨는 작은 창으로. Document PiP로 원본 화질 그대로 유지 + 커스텀 컨트롤(속도/볼륨/필터/줌·회전/스크린샷), 스크롤 시 자동 미니플레이어, 탭전환 자동 PIP(MediaSession), 미니 설정 팝오버, 상황별 프리셋, 단축키, 사이트별 설정 기억.
 // @description:en  Pop any video into an always-on-top window at original quality with custom controls, presets, auto-PiP, hotkeys and per-site memory (Document Picture-in-Picture).
 // @author       goguma613
@@ -903,7 +903,7 @@
 
     const MINI_CSS = `
       :host{all:initial;}
-      .mwrap{position:fixed;z-index:2147483646;width:336px;height:189px;
+      .mwrap{position:fixed;z-index:2147483646;width:480px;height:270px;
         background:#000;border-radius:12px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,.55);
         font-family:'Malgun Gothic',system-ui,-apple-system,sans-serif;color:#e9eef5;
         opacity:0;transform:translateY(8px);transition:opacity .2s ease,transform .2s ease;}

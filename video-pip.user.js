@@ -2,7 +2,7 @@
 // @name         🎬 고화질 영상 PIP (Picture-in-Picture)
 // @name:en      HD Video Picture-in-Picture
 // @namespace    https://github.com/goguma613/video-pip
-// @version      1.2.1
+// @version      1.2.2
 // @description  영상을 항상 위에 뜨는 작은 창으로. Document PiP로 원본 화질 그대로 유지 + 커스텀 컨트롤(속도/볼륨/필터/줌·회전/스크린샷), 스크롤 시 자동 미니플레이어, 탭전환 자동 PIP(MediaSession), 미니 설정 팝오버, 상황별 프리셋, 단축키, 사이트별 설정 기억.
 // @description:en  Pop any video into an always-on-top window at original quality with custom controls, presets, auto-PiP, hotkeys and per-site memory (Document Picture-in-Picture).
 // @author       goguma613
@@ -1203,10 +1203,7 @@
           if (!cfg.autoPip || !v || PipController.isActive()) return;
           // 자동 진입은 제스처가 없어 Document PiP가 불가 → 네이티브 PIP 사용
           if (document.pictureInPictureEnabled && !v.disablePictureInPicture && !document.pictureInPictureElement) {
-            v.requestPictureInPicture().then(() => {
-              autoNative = true;
-              v.addEventListener('leavepictureinpicture', () => { autoNative = false; }, { once: true });
-            }).catch(() => {});
+            v.requestPictureInPicture().catch(() => {});
           }
         });
       } catch (e) { /* 일부 브라우저 미지원 */ }
@@ -1214,14 +1211,22 @@
 
     function start() {
       setupMediaSession();
-      // 탭 복귀 시 자동으로 들어간 네이티브 PIP는 닫아 원위치 복귀
+      // 네이티브 PIP 진입을 "트리거 주체와 무관하게" 감지한다.
+      //  탭이 숨겨진 상태에서 PIP에 들어갔다면 = 탭전환 자동 PIP로 간주(우리 핸들러든 크롬 기본 자동PIP든).
+      //  ※ enterpictureinpicture는 <video> 네이티브 PIP에서만 발생(Document PiP와 무관).
+      document.addEventListener('enterpictureinpicture', () => {
+        if (document.hidden) autoNative = true;
+      }, true);
+      document.addEventListener('leavepictureinpicture', () => { autoNative = false; }, true);
+
+      // 탭으로 돌아오면 자동 진입했던 네이티브 PIP를 닫아 페이지로 복귀시킨다.
       document.addEventListener('visibilitychange', () => {
         if (document.hidden) return;
         const cfg = ConfigManager.get();
-        if (cfg.autoPip && cfg.restoreOnReturn && autoNative && document.pictureInPictureElement) {
+        if (cfg.restoreOnReturn && autoNative && document.pictureInPictureElement) {
           document.exitPictureInPicture().catch(() => {});
-          autoNative = false;
         }
+        autoNative = false;
       });
     }
     return { start, watch };

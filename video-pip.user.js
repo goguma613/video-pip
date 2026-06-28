@@ -2,7 +2,7 @@
 // @name         🎬 고화질 영상 PIP (Picture-in-Picture)
 // @name:en      HD Video Picture-in-Picture
 // @namespace    https://github.com/goguma613/video-pip
-// @version      1.2.3
+// @version      1.2.4
 // @description  영상을 항상 위에 뜨는 작은 창으로. Document PiP로 원본 화질 그대로 유지 + 커스텀 컨트롤(속도/볼륨/필터/줌·회전/스크린샷), 스크롤 시 자동 미니플레이어, 탭전환 자동 PIP(MediaSession), 미니 설정 팝오버, 상황별 프리셋, 단축키, 사이트별 설정 기억.
 // @description:en  Pop any video into an always-on-top window at original quality with custom controls, presets, auto-PiP, hotkeys and per-site memory (Document Picture-in-Picture).
 // @author       goguma613
@@ -77,7 +77,6 @@
     activePreset: 'basic',
     // 자동 PIP
     autoPip: false,        // 마스터(탭전환 자동PIP + 스크롤 이탈 미니플레이어)
-    restoreOnReturn: true,
     miniCorner: 'br',      // 미니플레이어 스냅 위치: tl | tr | bl | br
     // 단축키 (정규화된 콤보)
     hotkeys: {
@@ -1175,7 +1174,7 @@
   // AutoPipManager — 탭 전환 / 뷰포트 이탈 시 자동 PIP
   // ─────────────────────────────────────────────────────────────
   const AutoPipManager = (function () {
-    let io = null, autoNative = false;
+    let io = null;
 
     // 스크롤 이탈 → 미니플레이어(완전 자동, 제스처 불필요)
     function watch(video) {
@@ -1209,32 +1208,11 @@
       } catch (e) { /* 일부 브라우저 미지원 */ }
     }
 
-    // 탭으로 돌아왔을 때(가시성 복귀 또는 윈도우 포커스) 자동 진입분 PIP를 닫아 페이지로 복귀
-    function maybeRestoreOnReturn() {
-      if (document.hidden) return;            // 아직 안 보이면 무시
-      if (!autoNative) return;                // 수동으로 연 PIP는 건드리지 않음
-      const cfg = ConfigManager.get();
-      if (cfg.restoreOnReturn && document.pictureInPictureElement) {
-        document.exitPictureInPicture().catch(() => {});
-      }
-      autoNative = false;
-    }
-
     function start() {
       setupMediaSession();
-      // 네이티브 PIP 진입을 "트리거 주체와 무관하게" 감지한다.
-      //  탭이 숨겨진 상태에서 PIP에 들어갔다면 = 탭전환 자동 PIP로 간주(우리 핸들러든 크롬 기본 자동PIP든).
-      //  ※ enterpictureinpicture는 <video> 네이티브 PIP에서만 발생(Document PiP와 무관).
-      document.addEventListener('enterpictureinpicture', () => {
-        if (document.hidden) autoNative = true;
-      }, true);
-      document.addEventListener('leavepictureinpicture', () => { autoNative = false; }, true);
-
-      // 복귀 트리거를 둘 다 건다: 탭 전환 복귀(visibilitychange) + 다른 탭/창을 닫고 돌아옴(window focus).
-      //  visibilitychange만으로는 "다른 탭을 닫아 유튜브로 돌아온" 경우를 놓칠 수 있어 focus를 병행.
-      document.addEventListener('visibilitychange', maybeRestoreOnReturn);
-      window.addEventListener('focus', maybeRestoreOnReturn);
-      window.addEventListener('pageshow', maybeRestoreOnReturn);
+      // 자동 진입한 PIP도 수동 PIP처럼 "사용자가 직접 닫을 때까지 유지"한다.
+      //  (이전 1.2.2~1.2.3은 탭 복귀 시 자동으로 닫았는데, 다른 탭을 닫아 유튜브로
+      //   돌아오면 자동 PIP가 사라지는 문제가 있어 복귀 자동 닫기를 제거함.)
     }
     return { start, watch };
   })();

@@ -2,7 +2,7 @@
 // @name         🎬 고화질 영상 PIP (Picture-in-Picture)
 // @name:en      HD Video Picture-in-Picture
 // @namespace    https://github.com/goguma613/video-pip
-// @version      1.2.0
+// @version      1.2.1
 // @description  영상을 항상 위에 뜨는 작은 창으로. Document PiP로 원본 화질 그대로 유지 + 커스텀 컨트롤(속도/볼륨/필터/줌·회전/스크린샷), 스크롤 시 자동 미니플레이어, 탭전환 자동 PIP(MediaSession), 미니 설정 팝오버, 상황별 프리셋, 단축키, 사이트별 설정 기억.
 // @description:en  Pop any video into an always-on-top window at original quality with custom controls, presets, auto-PiP, hotkeys and per-site memory (Document Picture-in-Picture).
 // @author       goguma613
@@ -924,8 +924,8 @@
       .mb:hover{background:rgba(255,255,255,.16);color:#4f9dff;}
       .mb.x:hover{color:#ff5b5b;}
       .mb.up:hover{color:#3ddc84;}
-      .mcenter{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;}
-      .mplay{width:48px;height:48px;border:none;border-radius:50%;background:rgba(20,24,32,.5);
+      .mcenter{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;}
+      .mplay{pointer-events:auto;width:48px;height:48px;border:none;border-radius:50%;background:rgba(20,24,32,.5);
         color:#fff;font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
       .mplay:hover{background:rgba(79,157,255,.85);}
       .mbot{position:absolute;left:0;right:0;bottom:0;padding:0 9px 7px;background:linear-gradient(0deg,rgba(0,0,0,.72),transparent);}

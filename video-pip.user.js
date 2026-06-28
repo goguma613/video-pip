@@ -2,7 +2,7 @@
 // @name         🎬 고화질 영상 PIP (Picture-in-Picture)
 // @name:en      HD Video Picture-in-Picture
 // @namespace    https://github.com/goguma613/video-pip
-// @version      1.2.2
+// @version      1.2.3
 // @description  영상을 항상 위에 뜨는 작은 창으로. Document PiP로 원본 화질 그대로 유지 + 커스텀 컨트롤(속도/볼륨/필터/줌·회전/스크린샷), 스크롤 시 자동 미니플레이어, 탭전환 자동 PIP(MediaSession), 미니 설정 팝오버, 상황별 프리셋, 단축키, 사이트별 설정 기억.
 // @description:en  Pop any video into an always-on-top window at original quality with custom controls, presets, auto-PiP, hotkeys and per-site memory (Document Picture-in-Picture).
 // @author       goguma613
@@ -1209,6 +1209,17 @@
       } catch (e) { /* 일부 브라우저 미지원 */ }
     }
 
+    // 탭으로 돌아왔을 때(가시성 복귀 또는 윈도우 포커스) 자동 진입분 PIP를 닫아 페이지로 복귀
+    function maybeRestoreOnReturn() {
+      if (document.hidden) return;            // 아직 안 보이면 무시
+      if (!autoNative) return;                // 수동으로 연 PIP는 건드리지 않음
+      const cfg = ConfigManager.get();
+      if (cfg.restoreOnReturn && document.pictureInPictureElement) {
+        document.exitPictureInPicture().catch(() => {});
+      }
+      autoNative = false;
+    }
+
     function start() {
       setupMediaSession();
       // 네이티브 PIP 진입을 "트리거 주체와 무관하게" 감지한다.
@@ -1219,15 +1230,11 @@
       }, true);
       document.addEventListener('leavepictureinpicture', () => { autoNative = false; }, true);
 
-      // 탭으로 돌아오면 자동 진입했던 네이티브 PIP를 닫아 페이지로 복귀시킨다.
-      document.addEventListener('visibilitychange', () => {
-        if (document.hidden) return;
-        const cfg = ConfigManager.get();
-        if (cfg.restoreOnReturn && autoNative && document.pictureInPictureElement) {
-          document.exitPictureInPicture().catch(() => {});
-        }
-        autoNative = false;
-      });
+      // 복귀 트리거를 둘 다 건다: 탭 전환 복귀(visibilitychange) + 다른 탭/창을 닫고 돌아옴(window focus).
+      //  visibilitychange만으로는 "다른 탭을 닫아 유튜브로 돌아온" 경우를 놓칠 수 있어 focus를 병행.
+      document.addEventListener('visibilitychange', maybeRestoreOnReturn);
+      window.addEventListener('focus', maybeRestoreOnReturn);
+      window.addEventListener('pageshow', maybeRestoreOnReturn);
     }
     return { start, watch };
   })();

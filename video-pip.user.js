@@ -2,7 +2,7 @@
 // @name         🎬 고화질 영상 PIP (Picture-in-Picture)
 // @name:en      HD Video Picture-in-Picture
 // @namespace    https://github.com/goguma613/video-pip
-// @version      1.2.6
+// @version      1.2.7
 // @description  영상을 항상 위에 뜨는 작은 창으로. Document PiP로 원본 화질 그대로 유지 + 커스텀 컨트롤(속도/볼륨/필터/줌·회전/스크린샷), 스크롤 시 자동 미니플레이어, 탭전환 자동 PIP(MediaSession), 미니 설정 팝오버, 상황별 프리셋, 단축키, 사이트별 설정 기억.
 // @description:en  Pop any video into an always-on-top window at original quality with custom controls, presets, auto-PiP, hotkeys and per-site memory (Document Picture-in-Picture).
 // @author       goguma613
@@ -164,11 +164,20 @@
       return s;
     }
 
+    // 저장본 스키마 마이그레이션(구버전 → 현재). version 미기록 저장본은 0으로 간주.
+    function migrate(p) {
+      const from = (typeof p.version === 'number') ? p.version : 0;
+      if (from >= DEFAULTS.version) return p;
+      // 예) if (from < 2) { p.새필드 = 변환(p.옛필드); }  ← 스키마 바꿀 때 여기에 추가
+      p.version = DEFAULTS.version;
+      return p;
+    }
+
     function load() {
       try {
         const raw = localStorage.getItem(KEY);
         if (raw) {
-          const parsed = JSON.parse(raw);
+          const parsed = migrate(JSON.parse(raw));
           state = Object.assign(JSON.parse(JSON.stringify(DEFAULTS)), parsed);
           state.filters = Object.assign({}, DEFAULTS.filters, parsed.filters);
           state.hotkeys = Object.assign({}, DEFAULTS.hotkeys, parsed.hotkeys);
@@ -223,15 +232,13 @@
     function start(cb) {
       onChange = cb;
       const root = document.documentElement || document;
+      const hasVideo = (n) => n.nodeType === 1 && (n.tagName === 'VIDEO' || (n.querySelector && n.querySelector('video')));
       const mo = new MutationObserver((muts) => {
         let dirty = false;
+        outer:
         for (const m of muts) {
-          for (const n of m.addedNodes) {
-            if (n.nodeType === 1 && (n.tagName === 'VIDEO' || (n.querySelector && n.querySelector('video')))) dirty = true;
-          }
-          for (const n of m.removedNodes) {
-            if (n.nodeType === 1 && (n.tagName === 'VIDEO' || (n.querySelector && n.querySelector('video')))) dirty = true;
-          }
+          for (const n of m.addedNodes) if (hasVideo(n)) { dirty = true; break outer; }
+          for (const n of m.removedNodes) if (hasVideo(n)) { dirty = true; break outer; }
         }
         if (dirty && onChange) onChange(pickActive());
       });
@@ -997,6 +1004,13 @@
       seek.addEventListener('pointerup', mseekEnd);
       seek.addEventListener('pointercancel', mseekEnd);
       seek.addEventListener('lostpointercapture', mseekEnd);
+      // 휠=볼륨 / Shift+휠=배속 (PiP 창과 동일 UX)
+      wrap.addEventListener('wheel', (e) => {
+        const v = current && current.video; if (!v) return;
+        e.preventDefault();
+        if (e.shiftKey) PipController.nudgeRate(v, e.deltaY < 0 ? 0.1 : -0.1);
+        else { v.volume = clamp(v.volume + (e.deltaY < 0 ? 0.05 : -0.05), 0, 1); v.muted = false; }
+      }, { passive: false });
       makeDraggable(top);
     }
 
@@ -1088,7 +1102,7 @@
         current.io.observe(spacer);
       } catch (e) {}
 
-      Toast.show('📺 미니플레이어로 따라갑니다 · ⤢ 누르면 고화질 PIP로');
+      Toast.show('📺 미니플레이어로 따라갑니다 · ⤢=고화질 PIP · 휠=볼륨');
     }
 
     function exit() {
@@ -1590,8 +1604,8 @@
       });
       handle.addEventListener('pointermove', (e) => {
         if (!dragging) return;
-        w.style.left = Math.max(0, ox + e.clientX - sx) + 'px';
-        w.style.top = Math.max(0, oy + e.clientY - sy) + 'px';
+        w.style.left = clamp(ox + e.clientX - sx, 0, Math.max(0, innerWidth - w.offsetWidth)) + 'px';
+        w.style.top = clamp(oy + e.clientY - sy, 0, Math.max(0, innerHeight - w.offsetHeight)) + 'px';
         w.style.right = 'auto';
       });
       const end = () => { dragging = false; };

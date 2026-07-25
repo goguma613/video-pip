@@ -2,7 +2,7 @@
 // @name         🎬 고화질 영상 PIP (Picture-in-Picture)
 // @name:en      HD Video Picture-in-Picture
 // @namespace    https://github.com/goguma613/video-pip
-// @version      1.2.5
+// @version      1.2.6
 // @description  영상을 항상 위에 뜨는 작은 창으로. Document PiP로 원본 화질 그대로 유지 + 커스텀 컨트롤(속도/볼륨/필터/줌·회전/스크린샷), 스크롤 시 자동 미니플레이어, 탭전환 자동 PIP(MediaSession), 미니 설정 팝오버, 상황별 프리셋, 단축키, 사이트별 설정 기억.
 // @description:en  Pop any video into an always-on-top window at original quality with custom controls, presets, auto-PiP, hotkeys and per-site memory (Document Picture-in-Picture).
 // @author       goguma613
@@ -823,7 +823,8 @@
           if (!blob) { Toast.show('스크린샷 캡처 실패(보호된 영상).'); return; }
           const a = document.createElement('a');
           a.href = URL.createObjectURL(blob);
-          a.download = 'screenshot_' + Math.floor(video.currentTime) + 's.png';
+          const title = (document.title || '').replace(/[\\/:*?"<>|]+/g, ' ').trim().slice(0, 60) || 'screenshot';
+          a.download = title + '_' + Math.floor(video.currentTime) + 's.png';
           a.click();
           setTimeout(() => URL.revokeObjectURL(a.href), 1000);
         }, 'image/png');
@@ -889,7 +890,7 @@
       current.video = newVideo;
     }
 
-    return { enter, exit, toggle, isActive, getVideo, setOnStateChange, tryResize, onActiveVideoChanged, screenshot, cycleRate, nudgeRate, get isAuto() { return autoEntered; } };
+    return { enter, exit, toggle, isActive, getVideo, setOnStateChange, tryResize, onActiveVideoChanged, screenshot, cycleRate, nudgeRate, get isAuto() { return autoEntered; }, get mode() { return current ? current.mode : null; } };
   })();
 
   // ─────────────────────────────────────────────────────────────
@@ -903,7 +904,7 @@
 
     const MINI_CSS = `
       :host{all:initial;}
-      .mwrap{position:fixed;z-index:2147483646;width:480px;height:270px;
+      .mwrap{position:fixed;z-index:2147483646;width:min(480px,36vw);aspect-ratio:16/9;
         background:#000;border-radius:12px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,.55);
         font-family:'Malgun Gothic',system-ui,-apple-system,sans-serif;color:#e9eef5;
         opacity:0;transform:translateY(8px);transition:opacity .2s ease,transform .2s ease;}
@@ -980,11 +981,22 @@
         exit();
       });
       closeBtn.addEventListener('click', () => { const v = current && current.video; exit(); if (v) try { v.pause(); } catch (e) {} });
-      seek.addEventListener('pointerdown', (e) => {
+      let mseeking = false;
+      const mseekTo = (clientX) => {
         const v = current && current.video; if (!v || !isFinite(v.duration)) return;
         const r = track.getBoundingClientRect();
-        v.currentTime = clamp((e.clientX - r.left) / r.width, 0, 1) * v.duration;
+        v.currentTime = clamp((clientX - r.left) / r.width, 0, 1) * v.duration;
+      };
+      seek.addEventListener('pointerdown', (e) => {
+        mseeking = true;
+        try { seek.setPointerCapture(e.pointerId); } catch (er) {}
+        mseekTo(e.clientX);
       });
+      seek.addEventListener('pointermove', (e) => { if (mseeking) mseekTo(e.clientX); });
+      const mseekEnd = () => { mseeking = false; };
+      seek.addEventListener('pointerup', mseekEnd);
+      seek.addEventListener('pointercancel', mseekEnd);
+      seek.addEventListener('lostpointercapture', mseekEnd);
       makeDraggable(top);
     }
 
@@ -1155,18 +1167,25 @@
         case 'sizeToggle': { const big = cfg.pipSize.w < 700; const nw = big ? 900 : 480, nh = big ? 506 : 270; ConfigManager.set({ pipSize: { w: nw, h: nh } }); PipController.tryResize(nw, nh); break; }
       }
     }
-    function handle(e) {
+    function handle(e, isMain) {
       const t = e.target;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
       const action = keymap()[combo(e)];
       if (!action) return;
-      // PIP/미니 비활성 시엔 togglePip만 동작(사이트 단축키 보존)
-      if (action !== 'togglePip' && !PipController.isActive() && !MiniPlayer.isActive()) return;
+      if (isMain) {
+        const miniOn = MiniPlayer.isActive();
+        const pipMode = PipController.mode; // 'doc' | 'legacy' | null
+        // 아무것도 비활성 → togglePip만 동작(사이트 단축키 보존)
+        if (!miniOn && !pipMode && action !== 'togglePip') return;
+        // Document PiP 창이 따로 떠 있을 땐 메인 페이지 단일키(k/f/m/Space 등)를 사이트에 양보.
+        // PiP 영상 제어는 PiP 창 자체 단축키로 충분. (미니플레이어/레거시 PIP는 페이지 안이라 전체 허용)
+        if (!miniOn && pipMode === 'doc' && action !== 'togglePip' && action !== 'screenshot') return;
+      }
       e.preventDefault();
       e.stopImmediatePropagation();
       run(action);
     }
-    function attach(doc) { doc.addEventListener('keydown', handle, { capture: true }); }
+    function attach(doc) { doc.addEventListener('keydown', (e) => handle(e, doc === document), { capture: true }); }
     return { attach };
   })();
 
@@ -1232,8 +1251,10 @@
         .t{position:fixed;left:50%;bottom:32px;transform:translateX(-50%);z-index:2147483647;
           background:rgba(22,26,34,.95);backdrop-filter:blur(12px);color:#e9eef5;font-family:'Malgun Gothic',system-ui,sans-serif;
           border:1px solid rgba(255,255,255,.12);border-radius:999px;padding:10px 18px;font-size:13px;font-weight:600;
-          box-shadow:0 10px 30px rgba(0,0,0,.45);cursor:default;opacity:0;transition:opacity .2s;white-space:nowrap;}
+          box-shadow:0 10px 30px rgba(0,0,0,.45);cursor:default;opacity:0;transition:opacity .2s;white-space:nowrap;
+          pointer-events:none;}
         .t.show{opacity:1;} .t.click{cursor:pointer;border-color:#4f9dff;}
+        .t.show.click{pointer-events:auto;}
       `;
       shadow.appendChild(st);
       box = document.createElement('div'); box.className = 't';
@@ -1262,9 +1283,13 @@
 
     const CSS = `
       :host{all:initial;}
-      .wrap{position:fixed;z-index:2147483647;top:80px;right:24px;
+      /* z-index 2000: 유튜브 팝업(계정 메뉴·화질 메뉴 컨테이너, z≈2200)보다 아래여야
+         사이트 메뉴가 패널 위로 떠서 클릭을 가로채지 않음. 최상위(2147483647)로 올리지 말 것. */
+      .wrap{position:fixed;z-index:2000;top:80px;right:24px;
         font-family:'Malgun Gothic',-apple-system,system-ui,sans-serif;color:#e9eef5;user-select:none;transition:opacity .25s ease;}
-      .wrap.idle{opacity:.32;}
+      .wrap.idle{opacity:.32;pointer-events:none;}
+      .wrap.fs-hide .panel{display:none;}
+      .wrap.fs-hide .pill{display:inline-flex;}
       .panel{width:256px;padding:14px;background:rgba(22,26,34,.92);backdrop-filter:blur(12px);
         border:1px solid rgba(255,255,255,.08);border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.45);}
       .panel.hidden{display:none;}
@@ -1376,8 +1401,9 @@
       els = { pipBtn, pipLabel, pipDot, autoSw, presetBtns, pill, pdot, head, vselWrap, vselSec, advanced };
 
       bindEvents();
-      mountToFullscreenOrBody();
-      startIdleFade();
+      placePanel();
+      bindGlobalsOnce();
+      armIdle();
       maybeOnboard();
       refreshState(PipController.isActive());
     }
@@ -1440,7 +1466,8 @@
       const keys = el(d, 'div', { class: 'keys' });
       keyData.forEach(([k, desc]) => keys.appendChild(
         el(d, 'div', {}, [el(d, 'b', { text: k }), el(d, 'span', { text: ' ' + desc })])));
-      const grpKeys = group(d, '⌨️ 단축키', [keys]);
+      const grpKeys = group(d, '⌨️ 단축키', [keys,
+        el(d, 'div', { class: 'note', text: '※ 재생 단축키는 PIP 창 안 또는 미니플레이어 활성 중에 동작해요. PIP 창이 떠 있어도 원본 페이지의 사이트 단축키는 그대로 살아 있습니다.' })]);
 
       // 전체 초기화(이 사이트)
       const allReset = el(d, 'button', { class: 'resetb', text: '↺ 모든 설정 초기화 (이 사이트)' });
@@ -1500,7 +1527,11 @@
       });
       PRESET_KEYS.forEach((k) => els.presetBtns[k].addEventListener('click', () => applyPreset(k)));
       els.head.querySelector('.iconbtn').addEventListener('click', () => setCollapsed(true));
-      els.pill.addEventListener('click', () => setCollapsed(false));
+      els.pill.addEventListener('click', () => {
+        // 전체화면 pill 전용 상태에선 이번 전체화면 동안만 패널을 다시 연다(설정은 안 건드림)
+        if (wrap.classList.contains('fs-hide')) { wrap.classList.remove('fs-hide'); return; }
+        setCollapsed(false);
+      });
       makeDraggable(els.head, wrap);
     }
 
@@ -1568,25 +1599,37 @@
       handle.addEventListener('pointercancel', end);
     }
 
-    function startIdleFade() {
-      const wake = () => {
-        wrap.classList.remove('idle');
-        clearTimeout(idleTimer);
-        if (ConfigManager.get().fadeWhenIdle) idleTimer = setTimeout(() => wrap.classList.add('idle'), 3500);
-      };
-      ['pointermove', 'pointerdown', 'keydown'].forEach((ev) => window.addEventListener(ev, wake, { passive: true }));
-      wake();
+    // idle 상태는 클릭 통과(pointer-events:none) — 반투명 패널이 사이트 클릭을 몰래 삼키지 않게.
+    // 마우스가 패널 근처(±28px)로 와야 깨어나므로, 깨어난 패널은 항상 또렷하게 보이는 상태.
+    function armIdle() {
+      clearTimeout(idleTimer);
+      if (ConfigManager.get().fadeWhenIdle) idleTimer = setTimeout(() => wrap && wrap.classList.add('idle'), 3500);
     }
-
-    function mountToFullscreenOrBody() {
-      const place = () => {
-        const fs = document.fullscreenElement || document.webkitFullscreenElement;
-        const target = fs || document.body;
-        if (host.parentElement !== target) target.appendChild(host);
+    function placePanel() {
+      const fs = document.fullscreenElement || document.webkitFullscreenElement;
+      const target = fs || document.body;
+      if (host && host.parentElement !== target) target.appendChild(host);
+      // 전체화면에선 화질 메뉴 자리와 겹치므로 pill만 표시(pill 클릭 시 이번만 패널 열림)
+      if (wrap) wrap.classList.toggle('fs-hide', !!fs);
+    }
+    // 전역 리스너는 최초 1회만 등록 — "모든 설정 초기화"로 build()가 다시 불려도 중복 누적 방지.
+    let globalsBound = false;
+    function bindGlobalsOnce() {
+      if (globalsBound) return;
+      globalsBound = true;
+      const NEAR = 28;
+      const wake = (e) => {
+        if (!wrap) return;
+        const r = wrap.getBoundingClientRect();
+        if (e.clientX < r.left - NEAR || e.clientX > r.right + NEAR ||
+            e.clientY < r.top - NEAR || e.clientY > r.bottom + NEAR) return;
+        wrap.classList.remove('idle');
+        armIdle();
       };
-      place();
-      document.addEventListener('fullscreenchange', place);
-      document.addEventListener('webkitfullscreenchange', place);
+      window.addEventListener('pointermove', wake, { passive: true });
+      window.addEventListener('pointerdown', wake, { passive: true });
+      document.addEventListener('fullscreenchange', placePanel);
+      document.addEventListener('webkitfullscreenchange', placePanel);
     }
 
     function maybeOnboard() {

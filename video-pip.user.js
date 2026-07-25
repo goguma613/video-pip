@@ -2,7 +2,7 @@
 // @name         🎬 고화질 영상 PIP (Picture-in-Picture)
 // @name:en      HD Video Picture-in-Picture
 // @namespace    https://github.com/goguma613/video-pip
-// @version      1.2.7
+// @version      1.2.8
 // @description  영상을 항상 위에 뜨는 작은 창으로. Document PiP로 원본 화질 그대로 유지 + 커스텀 컨트롤(속도/볼륨/필터/줌·회전/스크린샷), 스크롤 시 자동 미니플레이어, 탭전환 자동 PIP(MediaSession), 미니 설정 팝오버, 상황별 프리셋, 단축키, 사이트별 설정 기억.
 // @description:en  Pop any video into an always-on-top window at original quality with custom controls, presets, auto-PiP, hotkeys and per-site memory (Document Picture-in-Picture).
 // @author       goguma613
@@ -1305,7 +1305,11 @@
       .wrap.fs-hide .panel{display:none;}
       .wrap.fs-hide .pill{display:inline-flex;}
       .panel{width:256px;padding:14px;background:rgba(22,26,34,.92);backdrop-filter:blur(12px);
-        border:1px solid rgba(255,255,255,.08);border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.45);}
+        border:1px solid rgba(255,255,255,.08);border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.45);
+        max-height:calc(100vh - 110px);overflow-y:auto;overscroll-behavior:contain;}
+      .panel::-webkit-scrollbar{width:6px;}
+      .panel::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border-radius:3px;}
+      .panel::-webkit-scrollbar-track{background:transparent;}
       .panel.hidden{display:none;}
       .head{display:flex;align-items:center;gap:6px;margin-bottom:12px;cursor:move;}
       .title{font-size:13px;font-weight:700;flex:1;}
@@ -1502,8 +1506,9 @@
       } };
     }
 
+    // 그룹은 접힌 상태로 시작 — 전부 펼치면 패널이 화면(1080p 기준)을 넘어감
     function group(d, label, children) {
-      return el(d, 'details', { class: 'grp', open: '' }, [el(d, 'summary', { text: label }), ...children.map((c) => c)]);
+      return el(d, 'details', { class: 'grp' }, [el(d, 'summary', { text: label }), ...children.map((c) => c)]);
     }
     function slider(d, label, min, max, step, val, fmt, onInput) {
       const cl = el(d, 'span', { class: 'cl', text: label });
@@ -1607,6 +1612,7 @@
         w.style.left = clamp(ox + e.clientX - sx, 0, Math.max(0, innerWidth - w.offsetWidth)) + 'px';
         w.style.top = clamp(oy + e.clientY - sy, 0, Math.max(0, innerHeight - w.offsetHeight)) + 'px';
         w.style.right = 'auto';
+        fitPanel();
       });
       const end = () => { dragging = false; };
       handle.addEventListener('pointerup', end);
@@ -1625,6 +1631,13 @@
       if (host && host.parentElement !== target) target.appendChild(host);
       // 전체화면에선 화질 메뉴 자리와 겹치므로 pill만 표시(pill 클릭 시 이번만 패널 열림)
       if (wrap) wrap.classList.toggle('fs-hide', !!fs);
+      fitPanel();
+    }
+    // 패널이 화면 아래로 잘리지 않게, 현재 위치 기준으로 최대 높이를 재계산(내용은 스크롤)
+    function fitPanel() {
+      if (!panel || !wrap || !wrap.isConnected) return;
+      const top = wrap.getBoundingClientRect().top;
+      panel.style.maxHeight = Math.max(160, innerHeight - top - 16) + 'px';
     }
     // 전역 리스너는 최초 1회만 등록 — "모든 설정 초기화"로 build()가 다시 불려도 중복 누적 방지.
     let globalsBound = false;
@@ -1642,6 +1655,7 @@
       };
       window.addEventListener('pointermove', wake, { passive: true });
       window.addEventListener('pointerdown', wake, { passive: true });
+      window.addEventListener('resize', fitPanel, { passive: true });
       document.addEventListener('fullscreenchange', placePanel);
       document.addEventListener('webkitfullscreenchange', placePanel);
     }

@@ -25,6 +25,8 @@ export interface Tracker {
   at(x: number, y: number): HTMLVideoElement | null;
   /** 사용자가 직접 고른 영상을 우선 */
   setManual(v: HTMLVideoElement | null): void;
+  /** 페이지의 "주인공" 영상인가: 재생 중 + 화면의 20% 이상 + (소리 남 또는 사이트 주 영상). 미리보기 등은 제외 */
+  prominent(v: HTMLVideoElement): boolean;
   videos(): HTMLCollectionOf<HTMLVideoElement>;
 }
 
@@ -77,6 +79,13 @@ export function createTracker(doc: Document, adapter: SiteAdapter): Tracker {
       return hits.length > 1 ? best(hits) : hits[0] ?? null;
     },
     setManual(v) { manual = v; },
+    prominent(v) {
+      const primary = adapter.primaryVideo?.() ?? null;
+      const i = info(v, primary);
+      const vw = doc.documentElement.clientWidth || innerWidth;
+      const vh = doc.documentElement.clientHeight || innerHeight;
+      return i.playing && !i.tiny && (i.area * i.visible) / (vw * vh) >= 0.2 && (i.audible || i.primary);
+    },
     videos: () => all,
   };
 }

@@ -29,6 +29,7 @@ function setup(over: Partial<SessionDeps> = {}) {
   const uis: (MountedUI & { setVideo: ReturnType<typeof vi.fn> })[] = [];
   const deps: SessionDeps = {
     pick: () => video,
+    follow: () => null,
     title: () => '제목',
     docPip: () => true,
     requestWindow: vi.fn(async () => { const w = fakeWindow(); wins.push(w); return w as unknown as Window; }),
@@ -180,6 +181,31 @@ describe('Session', () => {
     await t.session.open();
     document.body.append(other);
     t.deps.pick = () => other;
+    t.session.rebind();
+    expect(t.session.video()).toBe(t.video);
+  });
+
+  it('PiP 영상이 멈췄고 페이지에서 다른 주인공 영상이 재생되면 그 영상을 따라간다(유튜브 일반 ↔ 쇼츠)', async () => {
+    const shorts = document.createElement('video');
+    const fitWindow = vi.fn();
+    const t = setup({ follow: () => shorts, fitWindow });
+    Object.defineProperty(t.video, 'currentSrc', { value: 'blob:https://www.youtube.com/1' });
+    await t.session.open();
+    document.body.append(shorts);          // 쇼츠 플레이어의 영상이 재생 시작 (PiP 영상은 일시정지 상태)
+    t.session.rebind();
+    expect(t.session.video()).toBe(shorts);
+    expect(shorts.ownerDocument).toBe(t.wins[0].document);
+    expect(isHome(t)).toBe(true);           // 이전 영상은 제자리로
+    expect(fitWindow).toHaveBeenCalledWith(t.wins[0], shorts);
+  });
+
+  it('PiP 영상이 재생 중이면 다른 영상이 재생돼도 바꾸지 않는다', async () => {
+    const other = document.createElement('video');
+    const t = setup({ follow: () => other });
+    Object.defineProperty(t.video, 'currentSrc', { value: 'blob:https://www.youtube.com/1' });
+    Object.defineProperty(t.video, 'paused', { value: false });
+    await t.session.open();
+    document.body.append(other);
     t.session.rebind();
     expect(t.session.video()).toBe(t.video);
   });

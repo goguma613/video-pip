@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { seekRange } from '../src/media';
 import { score, type VideoInfo } from '../src/tracker';
 import { fmtTime, pipWindowSize } from '../src/util';
 
@@ -35,5 +36,19 @@ describe('시간 표시', () => {
     expect(fmtTime(65.9)).toBe('1:05');
     expect(fmtTime(3725)).toBe('1:02:05');
     expect(fmtTime(NaN)).toBe('0:00');
+  });
+});
+
+describe('탐색 구간', () => {
+  const ranges = (start: number, end: number) => ({ length: 1, start: () => start, end: () => end }) as unknown as TimeRanges;
+  const none = { length: 0 } as unknown as TimeRanges;
+  it('브라우저가 알려 주는 seekable을 우선(라이브 DVR: 길이가 유한해도)', () => {
+    expect(seekRange({ seekable: ranges(3600, 8100), duration: 8125 } as HTMLVideoElement)).toEqual({ start: 3600, end: 8100 });
+  });
+  it('seekable이 없으면 [0, 길이]', () => {
+    expect(seekRange({ seekable: none, duration: 20 } as HTMLVideoElement)).toEqual({ start: 0, end: 20 });
+  });
+  it('둘 다 없으면 null', () => {
+    expect(seekRange({ seekable: none, duration: NaN } as HTMLVideoElement)).toBeNull();
   });
 });

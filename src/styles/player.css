@@ -62,7 +62,7 @@ svg { display: block; }
 .seek:hover .thumb, .seek.drag .thumb { transform: scale(1); }
 .tip { position: absolute; bottom: 20px; left: 0; transform: translateX(-50%); padding: 2px 6px; border-radius: 6px; background: var(--panel); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; display: none; }
 .seek:hover .tip, .seek.drag .tip { display: block; }
-.seek.live .track { cursor: pointer; }
+.seek.is-live .track { cursor: pointer; }
 
 .row { display: flex; align-items: center; gap: 2px; height: 34px; }
 .time { padding: 0 6px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--dim); white-space: nowrap; }

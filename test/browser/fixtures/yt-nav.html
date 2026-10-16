@@ -1,0 +1,34 @@
+<!doctype html><html><head><meta charset="utf-8"><title>첫 영상 - YouTube</title>
+<style>
+#movie_player{position:relative;width:854px;height:480px;background:#000}.html5-video-container{position:relative;width:100%;height:100%}video.html5-main-video{position:absolute}
+ytd-shorts{display:block} #shorts-player{position:relative;width:405px;height:720px;background:#000} #shorts-player video{width:405px;height:720px}
+</style></head><body>
+<ytd-watch-flexy id="watch"><div id="movie_player" class="html5-video-player"><div class="html5-video-container">
+<video class="video-stream html5-main-video" src="/land.webm" autoplay loop style="width:854px;height:480px;left:0;top:0"></video></div></div></ytd-watch-flexy>
+<ytd-shorts id="shorts" hidden></ytd-shorts>
+<script>
+  // 유튜브처럼 플레이어가 자기 영상 요소를 기억한다(PiP로 옮겨져도 조작 가능)
+  window.watchVideo = document.querySelector('#movie_player video');
+  const nav = (path, title) => { history.pushState({}, '', path); document.title = title; window.dispatchEvent(new Event('yt-navigate-finish')); };
+  window.toShorts = () => {
+    watchVideo.pause();
+    document.getElementById('watch').hidden = true;
+    const shorts = document.getElementById('shorts');
+    shorts.hidden = false;
+    if (!window.shortsVideo) {
+      const r = document.createElement('ytd-reel-video-renderer'); r.setAttribute('is-active', '');
+      const p = document.createElement('div'); p.id = 'shorts-player'; p.className = 'html5-video-player';
+      const v = document.createElement('video'); v.src = '/portrait.webm'; v.loop = true;
+      p.append(v); r.append(p); shorts.append(r); window.shortsVideo = v;
+    }
+    nav('/shorts/abc', '쇼츠 영상 - YouTube');
+    shortsVideo.play();
+  };
+  window.toWatch = () => {
+    shortsVideo.pause();
+    document.getElementById('shorts').hidden = true;
+    document.getElementById('watch').hidden = false;
+    nav('/watch?v=nav2', '두번째 영상 - YouTube');
+    watchVideo.currentTime = 0; watchVideo.play();
+  };
+</script></body></html>

@@ -1,0 +1,10 @@
+<!doctype html><html><head><meta charset="utf-8"><title>(3) 테스트 영상 - YouTube</title>
+<style>#movie_player{position:relative;width:854px;height:480px;background:#000}
+.html5-video-container{position:relative;width:100%;height:100%}
+video.html5-main-video{position:absolute}</style></head><body>
+<div id="movie_player" class="html5-video-player"><div class="html5-video-container">
+<video class="video-stream html5-main-video" src="/land.webm" autoplay loop style="width: 854px; height: 480px; left: 0px; top: 0px;"></video></div></div>
+<button id="fs" onclick="document.getElementById('movie_player').requestFullscreen()">fullscreen</button>
+<input id="search" placeholder="search">
+<script>window.siteKeys=[];document.addEventListener('keydown',e=>siteKeys.push(e.code));</script>
+</body></html>

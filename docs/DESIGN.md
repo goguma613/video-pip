@@ -1,8 +1,9 @@
 # 🎬 video-pip v2 — 재설계서 (근본 버전)
 
-> **상태:** 설계안 (구현 전) · **대상 버전:** 2.0.0 · **작성:** 2026-10-16
+> **상태:** 2.0.0 구현 완료 · 실제 브라우저(Tampermonkey + 실제 사이트) 수동 확인 대기 · **작성:** 2026-10-16
 > **방향:** 뺄 건 빼고 근본만. "원본 화질 그대로 작은 창에 띄우고, 편하게 조작하고, 끄면 깔끔하게 제자리로." 이 세 가지를 확실하게 하는 데 집중한다.
-> v1.x(1.2.8) 코드는 참고만 하고 재사용하지 않는다. 루트의 v1 코드와 `PLAN.md`는 M1 단계에서 교체한다(git 히스토리에는 남음).
+> v1.x(1.2.8) 코드는 참고만 하고 재사용하지 않았다. v1 코드와 `PLAN.md`는 교체·삭제했다(git 히스토리에는 남음).
+> 구현하면서 설계와 달라진 점은 해당 절에 **[구현]** 으로 적었다.
 
 ---
 
@@ -138,23 +139,27 @@ v1에 있었거나 계획만 했던 기능이다. 지금은 넣지 않는다. �
 
 ## 5. 아키텍처
 
-### 5.1 모듈 (약 12개 파일, 목표 1,000~1,200줄)
+### 5.1 모듈 (목표 1,000~1,200줄)
+
+**[구현]** 실제 구성(소스 약 1,500줄, CSS 포함). `pip-window.ts`는 따로 둘 만큼 크지 않아 창 열기는 `main.ts`, 창 크기 계산은 `util.ts`로 합쳤고, 메타블록은 빌드 스크립트 쪽(`scripts/meta.mjs`)으로 옮겼다. 영상 조작 함수는 버튼과 단축키가 함께 쓰므로 `media.ts`로 분리했다.
 
 ```
 src/
-├─ main.ts          부트스트랩: 프레임 판별, 모듈 연결
-├─ meta.ts          유저스크립트 메타블록
+├─ main.ts          부트스트랩: 모듈 연결, 창 열기, 자동 PIP 핸들러
 ├─ config.ts        기본값 · 검증 · 저장(GM 또는 localStorage) · v1 이관
 ├─ tracker.ts       영상 탐지 · 대상 선택
 ├─ dock.ts          영상 이동 / 복원 (영상을 옮기는 유일한 곳)
 ├─ session.ts       상태 머신 (idle · opening · doc · legacy)
-├─ pip-window.ts    Document PiP 창 열기 · 스타일 주입 · 닫힘 감지 / 기본 PiP
-├─ player-ui.ts     PiP 창 컨트롤
-├─ launcher.ts      hover 칩
+├─ player-ui.ts     PiP 창 컨트롤 + ⚙ 팝오버
+├─ launcher.ts      hover 칩 + 알림(토스트)
 ├─ commands.ts      명령 표(id · 키 · 실행) + 키 매칭
+├─ media.ts         재생·시크·볼륨·배속 조작
 ├─ sites.ts         generic + youtube 어댑터
-├─ dom.ts           h() 헬퍼 (대상 문서에서 요소 생성, innerHTML 금지)
-└─ styles/          player.css · launcher.css
+├─ dom.ts           h() 헬퍼 · 스타일 주입 · 아이콘 (innerHTML 금지)
+├─ util.ts          clamp · 시간 표시 · debounce · 창 크기 계산
+└─ styles/          player.css · page.css
+scripts/meta.mjs    유저스크립트 메타블록
+scripts/build.mjs   빌드 / 개발 서버
 ```
 
 **규칙:** 모듈끼리 서로 호출하지 않고 `session`(상태 + 이벤트)과 `commands`를 통해서만 연결한다. 이렇게 해서 v1의 순환 참조(PipController ↔ MiniPlayer ↔ HotkeyManager)를 없앤다.
@@ -241,6 +246,8 @@ interface SiteAdapter {
 ```
 v2.0은 `generic`과 `youtube` 두 개만 둔다.
 
+**[구현]** 복원 후 `resize` 이벤트는 어느 사이트든 Session이 보내므로 `afterRestore`는 빼고, 위치 보정은 상단 여백 하나(`launcherInset`)로 줄였다.
+
 ### 5.7 프레임
 
 - 최상위 프레임: 전체 기능.
@@ -257,11 +264,13 @@ interface Config {
   autoTabPip: boolean;       // 탭 전환 시 자동 PIP, 기본 false
   launcher: boolean;         // 런처 칩 표시, 기본 true
   disabledSites: string[];   // "이 사이트에서 끄기" 목록 (www. · m. 제거한 호스트)
+  hinted: boolean;           // [구현] PiP 창 첫 진입 힌트를 보여 줬는지
 }
 ```
 - 값마다 범위와 타입을 검사하고, 잘못된 값은 기본값으로 바꾼다.
 - 저장은 300ms debounce, `pagehide`에서 즉시 저장한다.
 - **저장소(S1 결과로 확정):** GM 저장소가 되면 모든 사이트 공통. 안 되면 사이트별 `localStorage['vpip:v2']`.
+  - **[구현]** S1은 이 개발 환경에서 확인할 수 없어(Tampermonkey 없음), v1에서 검증된 `@grant none` + 사이트별 localStorage로 출시한다. GM 저장소 코드는 들어 있어서, S1 확인 후 메타블록에 `@grant GM_getValue` / `GM_setValue`만 추가하면 자동으로 GM 저장소를 쓴다.
 - **v1 이관:** `localStorage.__videoPip_cfg`가 있으면 `pipSize`의 긴 변 → `pipLongEdge`, `autoPip` → `autoTabPip`만 옮긴다. 성공하면 v1 키를 지운다. 나머지 v1 설정은 해당 기능이 빠졌으므로 버린다.
 
 ---
@@ -288,6 +297,17 @@ interface Config {
 | **S3** | 유튜브(일반·라이브·광고·쇼츠)와 일반 사이트 1~2곳에서 영상 이동/복원 시 끊김·레이아웃 문제가 없는가 | 문제 사이트는 기본 PiP로 강제 |
 | **S4** | 창 크기 지정과 브라우저의 크기 기억이 어떻게 상호작용하는가(`preferInitialWindowPlacement`) | 직접 저장한 크기를 매번 지정 |
 | **S5** | Firefox 151에서 같은 코드가 동작하는가 | Firefox는 기본 PiP만 |
+
+**[구현] 스파이크 결과 (2026-10-16, Playwright Chromium 141 headless)**
+
+| ID | 결과 |
+|---|---|
+| S1 | ⏸ 이 환경에 Tampermonkey가 없어 확인 불가 → `@grant none`으로 출시(§6) |
+| S2 | ⏸ headless에서 탭 전환 자동 PiP를 일으킬 수 없음 → 코드만 반영, 실제 Chrome에서 확인 필요 |
+| S3 | 🔸 유튜브 구조를 흉내 낸 페이지(유튜브 주소로 띄움)와 일반 페이지에서 이동·재생 유지·복원·SPA 교체·전체화면 인계 모두 정상. 실제 유튜브·다른 사이트는 수동 확인 필요 |
+| S4 | ✅ 요청 크기는 정확히 전달됨(가로 480×270, 세로 270×480). headless 창은 요청 크기를 무시하므로 테스트는 요청 값을 검사 |
+| S5 | ⏸ Firefox 미설치 → 수동 확인 필요 |
+| 추가 | ✅ headless Chromium에서 Document PiP 창 열기·조작·닫기가 실제로 동작함 → 자동 브라우저 검증 가능(§9) |
 
 ---
 
@@ -324,6 +344,7 @@ interface Config {
 - `@match`: §11 D2 결정에 따름. `@exclude`는 Netflix·Disney+ 유지.
 - 명령: `npm run dev`(watch + 로컬 서버에서 설치용 URL 제공) · `build` · `typecheck` · `test`.
 - CI(GitHub Actions) 한 개: typecheck → test → build → 커밋된 `video-pip.user.js`가 빌드 결과와 같은지 확인.
+- **[구현] 브라우저 검증 추가.** §3.2에서 E2E를 뺐지만, headless Chromium에서 Document PiP가 실제로 동작해서 `npm run test:browser`(Playwright)를 넣었다. 빌드 결과물을 실제 브라우저에 주입해 §8 항목 대부분을 자동으로 확인한다. 이 검증이 구현 중에 "document-start 시점에 `<html>`이 없어 시작 실패" 버그를 잡아 넣을 가치를 증명했다. CI에서도 실행한다.
 - 배포: PR → `main` 머지 = 배포(raw URL이 곧 업데이트 채널). `CHANGELOG.md` 갱신.
 
 ```
@@ -351,11 +372,13 @@ video-pip/
 
 출시 후 필요하면 §3.2 후보(미니플레이어 → 자막 → 스크린샷 순)를 하나씩 결정해 추가한다.
 
+**[구현] 진행 현황:** M0(가능한 범위) · M1 · M2 완료. 단위 테스트 42개, 브라우저 검증 42개 통과. M3는 `docs/QA.md` 수동 확인 → `main` 머지만 남음.
+
 ---
 
-## 11. 결정 필요 사항
+## 11. 결정 사항
 
-설계는 아래 추천안을 전제로 했다. 다르게 가고 싶은 것만 알려 주면 된다.
+**[구현]** 아래 추천안대로 확정했다. D4만 S1 확인 전까지 플랜 B(사이트별 localStorage)로 출시한다.
 
 | # | 질문 | 추천 | 이유 |
 |---|---|---|---|

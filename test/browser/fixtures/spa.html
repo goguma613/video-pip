@@ -1,0 +1,7 @@
+<!doctype html><html><head><meta charset="utf-8"><title>SPA 1</title></head><body>
+<div id="app"><div id="player1"><video id="v1" src="/land.webm" autoplay loop width="640" height="360"></video></div></div>
+<button id="next" onclick="
+  document.getElementById('player1').remove();
+  const v=document.createElement('video'); v.id='v2'; v.src='/portrait.webm'; v.autoplay=true; v.loop=true; v.width=360; v.height=640;
+  const d=document.createElement('div'); d.id='player2'; d.append(v); document.getElementById('app').append(d); document.title='SPA 2';">next</button>
+</body></html>

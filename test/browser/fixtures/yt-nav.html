@@ -9,11 +9,15 @@ ytd-shorts{display:block} #shorts-player{position:relative;width:405px;height:72
 <script>
   // 유튜브처럼 플레이어가 자기 영상 요소를 기억한다(PiP로 옮겨져도 조작 가능)
   window.watchVideo = document.querySelector('#movie_player video');
+  // 유튜브 플레이어 API 흉내: stopVideo는 영상 데이터를 비운다(화면이 검게 됨)
+  const mp = document.getElementById('movie_player');
+  mp.pauseVideo = () => watchVideo.pause();
+  mp.stopVideo = () => { watchVideo.pause(); watchVideo.removeAttribute('src'); watchVideo.load(); };
   // 유튜브 SPA 이동: yt-navigate-start → (영상 정지 등) → 주소 변경 → yt-navigate-finish
-  const start = () => window.dispatchEvent(new Event('yt-navigate-start'));
+  const start = (url) => window.dispatchEvent(new CustomEvent('yt-navigate-start', { detail: url ? { url } : {} }));
   const nav = (path, title) => { history.pushState({}, '', path); document.title = title; window.dispatchEvent(new Event('yt-navigate-finish')); };
   window.toShorts = () => {
-    start();
+    start('/shorts/abc');
     watchVideo.pause();
     document.getElementById('watch').hidden = true;
     const shorts = document.getElementById('shorts');
@@ -28,19 +32,23 @@ ytd-shorts{display:block} #shorts-player{position:relative;width:405px;height:72
     shortsVideo.play();
   };
   window.toWatch = () => {
-    start();
+    start('/watch?v=nav2');
     shortsVideo.pause();
     document.getElementById('shorts').hidden = true;
     document.getElementById('watch').hidden = false;
     nav('/watch?v=nav2', '두번째 영상 - YouTube');
     watchVideo.currentTime = 0; watchVideo.play();
   };
-  // 시청 페이지 → 홈: 유튜브가 시청 중이던 영상을 멈춘다(lateMs면 이동이 끝난 뒤 늦게 멈춤)
-  window.toHome = (lateMs = 0) => {
-    start();
-    if (!lateMs) watchVideo.pause();
+  // 시청 페이지 → 홈: 유튜브가 시청 중이던 영상을 멈추거나(pause) 플레이어를 정지시킨다(stop: 영상 데이터 비움).
+  // late면 이동이 끝난 뒤 늦게, detail=false면 이동할 곳 정보 없이.
+  window.toHome = ({ late = 0, stop = false, detail = true } = {}) => {
+    start(detail ? '/' : null);
+    const teardown = () => (stop ? document.getElementById('movie_player').stopVideo() : watchVideo.pause());
+    if (!late) teardown();
     document.getElementById('watch').hidden = true;
     nav('/', '홈 - YouTube');
-    if (lateMs) setTimeout(() => watchVideo.pause(), lateMs);
+    if (late) setTimeout(teardown, late);
   };
+  // 다른 영상으로 이동하며 정지시키는 경우는 그대로 둬야 한다
+  window.stopTowardWatch = () => { start('/watch?v=zzz'); document.getElementById('movie_player').stopVideo(); };
 </script></body></html>

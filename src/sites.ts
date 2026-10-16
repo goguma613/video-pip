@@ -1,5 +1,4 @@
 // 사이트 어댑터. v2.0은 일반 + 유튜브만 둔다.
-import { debugLog } from './diag';
 
 export interface SiteAdapter {
   id: string;
@@ -13,11 +12,10 @@ export interface SiteAdapter {
   onNavigateStart?(cb: (dest: string | null) => void): void;
   /** 영상 페이지(다른 영상으로 가는 이동)인가. 아니면 이동 때문에 멈춘 PiP 영상을 이어서 재생한다 */
   isVideoPage?(path: string): boolean;
-  /**
-   * 페이지 이동 중 사이트가 플레이어를 정지시켜 영상 데이터를 비우는 것을 막는다(holding()일 때만).
-   * 설치한 게 없으면 null — 나중에 다시 시도한다.
-   */
-  protectOnNavigate?(holding: () => boolean): (() => void) | null;
+  /** PiP 영상이 무슨 영상인지(다시 불러오기용). home = 영상의 원래 자리 */
+  videoId?(home: Node | null): string | null;
+  /** 사이트가 비워 버린 영상을 같은 플레이어에 다시 불러온다. 했으면 true */
+  reload?(home: Node | null, id: string, at: number): boolean;
   /** 진단 기록용 플레이어 객체 */
   player?(): object | null;
   /** ⧉ 버튼의 영상 상단 여백(px). 사이트 UI를 피할 때 */
@@ -35,15 +33,15 @@ const generic: SiteAdapter = {
 
 // 유튜브 플레이어 객체(@grant none이라 페이지 JS에 접근 가능). 내부 API라 언제든 바뀔 수 있어 전부 방어적으로 쓴다.
 interface YtPlayer extends HTMLElement {
-  getVideoData?(): { isLive?: boolean } | undefined;
+  getVideoData?(): { isLive?: boolean; video_id?: string } | undefined;
   seekToLiveHead?(): void;
-  pauseVideo?(): void;
+  loadVideoById?(id: string, startSeconds?: number): void;
 }
 const ytPlayer = () => document.getElementById('movie_player') as YtPlayer | null;
+/** 영상의 원래 자리가 속한 플레이어(일반 / 쇼츠 / 미리보기 중 정확히 그 영상의 것) */
+const ownerPlayer = (home: Node | null) =>
+  ((home as Element | null)?.closest?.('.html5-video-player') as YtPlayer | null) ?? ytPlayer();
 const isShorts = () => location.pathname.startsWith('/shorts');
-
-// 영상을 비우는 플레이어 명령. 홈 등으로 이동하는 중엔 "일시정지"로 바꿔 영상 데이터를 지킨다.
-const TEARDOWN = ['stopVideo', 'cueVideoById', 'cueVideoByPlayerVars', 'cueVideoByUrl', 'cancelPlayback', 'clearVideo'];
 
 // 이동할 곳: 이벤트 정보 → 방금 누른 링크 → 모름
 let lastLink = { at: 0, href: '' };
@@ -73,26 +71,15 @@ const youtube: SiteAdapter = {
   },
   // 다른 영상(/watch)·쇼츠·라이브로 가는 이동은 사이트에 맡긴다. 홈·검색·채널 등은 PiP 영상을 지킨다
   isVideoPage: (path) => /^\/(watch|shorts|live|embed)(\/|$)/.test(path),
-  protectOnNavigate(holding) {
-    const undo: (() => void)[] = [];
-    for (const el of document.querySelectorAll<HTMLElement>('#movie_player, #shorts-player')) {
-      const p = el as unknown as Record<string, unknown> & YtPlayer;
-      for (const name of TEARDOWN) {
-        const orig = p[name];
-        if (typeof orig !== 'function') continue;
-        try {
-          p[name] = function (this: unknown, ...args: unknown[]) {
-            if (holding() && typeof p.pauseVideo === 'function') {
-              debugLog(`유튜브 player.${name}() → 일시정지로 대체(PiP 영상 보호)`);
-              return p.pauseVideo();
-            }
-            return (orig as (...a: unknown[]) => unknown).apply(this, args);
-          };
-          undo.push(() => { p[name] = orig; });
-        } catch { /* 쓸 수 없는 속성 */ }
-      }
-    }
-    return undo.length ? () => undo.forEach((f) => f()) : null;
+  videoId(home) {
+    try { const id = ownerPlayer(home)?.getVideoData?.()?.video_id; if (id) return id; } catch { /* API 변경 */ }
+    return location.pathname === '/watch' ? new URLSearchParams(location.search).get('v') : null;
+  },
+  // 유튜브는 시청 페이지를 떠나면 영상 요소를 직접 비운다(src 제거 + load). 같은 플레이어에 다시 불러온다
+  reload(home, id, at) {
+    const p = ownerPlayer(home);
+    if (typeof p?.loadVideoById !== 'function') return false;
+    try { p.loadVideoById(id, Math.max(0, Math.floor(at))); return true; } catch { return false; }
   },
   player: () => ytPlayer(),
   // 임베드 플레이어는 상단에 제목 바가 있어 그 아래로 내린다

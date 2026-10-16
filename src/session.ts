@@ -48,6 +48,8 @@ export interface Session {
   /** 페이지가 전체화면에 들어가면 영상을 돌려보낸다 */
   fullscreen(el: Element | null): void;
   refreshTitle(): void;
+  /** PiP 영상의 원래 자리(부모). PiP 중이 아니면 null */
+  home(): Node | null;
   subscribe(fn: (mode: Mode) => void): () => void;
 }
 
@@ -219,6 +221,8 @@ export function createSession(deps: SessionDeps): Session {
     refreshTitle() {
       active?.ui?.setTitle(deps.title());
     },
+
+    home: () => active?.token?.anchor.parentNode ?? null,
 
     subscribe(fn) {
       subs.add(fn);

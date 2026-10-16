@@ -2,7 +2,7 @@
 // @name           🎬 고화질 영상 PIP (Picture-in-Picture)
 // @name:en        HD Video Picture-in-Picture
 // @namespace      https://github.com/goguma613/video-pip
-// @version        2.0.3
+// @version        2.0.4
 // @description    영상을 원본 화질 그대로 항상 위에 뜨는 작은 창으로. 영상 위 ⧉ 버튼 또는 Alt+P 한 번이면 끝.
 // @description:en Pop any video into an always-on-top window at original quality (Document Picture-in-Picture). Hover button or Alt+P.
 // @author         goguma613
@@ -865,7 +865,7 @@
         () => config.siteDisabled(),
         (off) => config.setSiteDisabled(off)
       ),
-      h(doc, "div", { class: "ver", text: `v${"2.0.3"} · Alt+P로 언제든 켜고 끌 수 있어요` })
+      h(doc, "div", { class: "ver", text: `v${"2.0.4"} · Alt+P로 언제든 켜고 끌 수 있어요` })
     );
     const sync = () => opts.forEach((o) => o.el.setAttribute("aria-checked", String(o.get())));
     sync();
@@ -1100,6 +1100,7 @@
       refreshTitle() {
         active?.ui?.setTitle(deps.title());
       },
+      home: () => active?.token?.anchor.parentNode ?? null,
       subscribe(fn) {
         subs.add(fn);
         return () => subs.delete(fn);
@@ -1114,8 +1115,8 @@
     title: () => document.title || location.hostname
   };
   var ytPlayer = () => document.getElementById("movie_player");
+  var ownerPlayer = (home) => home?.closest?.(".html5-video-player") ?? ytPlayer();
   var isShorts = () => location.pathname.startsWith("/shorts");
-  var TEARDOWN = ["stopVideo", "cueVideoById", "cueVideoByPlayerVars", "cueVideoByUrl", "cancelPlayback", "clearVideo"];
   var lastLink = { at: 0, href: "" };
   function destOf(e) {
     const d = e.detail;
@@ -1144,29 +1145,24 @@
     },
     // 다른 영상(/watch)·쇼츠·라이브로 가는 이동은 사이트에 맡긴다. 홈·검색·채널 등은 PiP 영상을 지킨다
     isVideoPage: (path) => /^\/(watch|shorts|live|embed)(\/|$)/.test(path),
-    protectOnNavigate(holding) {
-      const undo = [];
-      for (const el of document.querySelectorAll("#movie_player, #shorts-player")) {
-        const p = el;
-        for (const name of TEARDOWN) {
-          const orig = p[name];
-          if (typeof orig !== "function") continue;
-          try {
-            p[name] = function(...args) {
-              if (holding() && typeof p.pauseVideo === "function") {
-                debugLog(`유튜브 player.${name}() → 일시정지로 대체(PiP 영상 보호)`);
-                return p.pauseVideo();
-              }
-              return orig.apply(this, args);
-            };
-            undo.push(() => {
-              p[name] = orig;
-            });
-          } catch {
-          }
-        }
+    videoId(home) {
+      try {
+        const id = ownerPlayer(home)?.getVideoData?.()?.video_id;
+        if (id) return id;
+      } catch {
       }
-      return undo.length ? () => undo.forEach((f) => f()) : null;
+      return location.pathname === "/watch" ? new URLSearchParams(location.search).get("v") : null;
+    },
+    // 유튜브는 시청 페이지를 떠나면 영상 요소를 직접 비운다(src 제거 + load). 같은 플레이어에 다시 불러온다
+    reload(home, id, at) {
+      const p = ownerPlayer(home);
+      if (typeof p?.loadVideoById !== "function") return false;
+      try {
+        p.loadVideoById(id, Math.max(0, Math.floor(at)));
+        return true;
+      } catch {
+        return false;
+      }
     },
     player: () => ytPlayer(),
     // 임베드 플레이어는 상단에 제목 바가 있어 그 아래로 내린다
@@ -1266,7 +1262,7 @@
   function boot() {
     const w = window;
     if (w.__videoPip) return;
-    w.__videoPip = "2.0.3";
+    w.__videoPip = "2.0.4";
     const top = isTopFrame();
     const adapter = pickAdapter(location);
     const local = safeLocalStorage();
@@ -1316,6 +1312,11 @@
         }
         for (const type of ["emptied", "pause", "ended"]) win.document.addEventListener(type, scheduleRebind, true);
         win.document.addEventListener("pause", keepAlive, true);
+        win.document.addEventListener("emptied", scheduleRevive, true);
+        win.document.addEventListener("timeupdate", () => {
+          const v2 = session.video();
+          if (v2 && v2.readyState > 0 && !v2.seeking) lastTime = v2.currentTime;
+        }, true);
         for (const type of ["pointerdown", "keydown", "wheel"]) win.document.addEventListener(type, () => {
           pipInputAt = Date.now();
         }, true);
@@ -1341,40 +1342,50 @@
       scheduleRebind();
       syncAutoPip();
       keepAlive();
+      scheduleRevive();
       setTimeout(keepAlive, 600);
     });
-    let nav = { at: 0, playing: false, resumes: 0, toVideo: false };
+    let nav = { at: 0, playing: false, toVideo: false, resumes: 0, revives: 0, id: null };
     let pipInputAt = 0;
-    let unprotect = null;
-    const holding = () => session.mode() === "doc" && nav.playing && !nav.toVideo && Date.now() - nav.at < 3e3;
-    const ensureProtect = () => {
-      if (session.mode() === "doc" && !unprotect) unprotect = adapter.protectOnNavigate?.(holding) ?? null;
-    };
-    session.subscribe((m) => {
-      if (m === "doc") ensureProtect();
-      else if (m === "idle" && unprotect) {
-        unprotect();
-        unprotect = null;
-      }
-    });
+    let lastTime = 0;
+    const fresh = (ms) => Date.now() - nav.at < ms;
+    const offVideoPage = () => !nav.toVideo && adapter.isVideoPage?.(location.pathname) === false;
     adapter.onNavigateStart?.((dest) => {
       const v = session.video();
       const doc = session.mode() === "doc";
-      nav = { at: Date.now(), playing: doc && !!v && !v.paused && !v.ended, resumes: 0, toVideo: dest != null && !!adapter.isVideoPage?.(dest) };
-      if (doc) {
-        ensureProtect();
-        traceNavigation(v, adapter.player?.() ?? null);
-      }
+      nav = {
+        at: Date.now(),
+        playing: doc && !!v && !v.paused && !v.ended,
+        toVideo: dest != null && !!adapter.isVideoPage?.(dest),
+        resumes: 0,
+        revives: 0,
+        id: doc ? adapter.videoId?.(session.home()) ?? null : null
+      };
+      if (!doc) return;
+      if (v) lastTime = v.currentTime;
+      traceNavigation(v, adapter.player?.() ?? null);
+      debugLog("PiP 상태", { id: nav.id, playing: nav.playing, toVideo: nav.toVideo, dest });
     });
     function keepAlive() {
       const v = session.video();
-      if (!v || session.mode() !== "doc" || !nav.playing || !v.paused || v.ended) return;
-      const now = Date.now();
-      if (now - nav.at > 5e3 || now - pipInputAt < 1e3 || nav.resumes >= 3) return;
-      if (nav.toVideo || adapter.isVideoPage?.(location.pathname) !== false) return;
+      if (!v || session.mode() !== "doc" || !nav.playing || !v.paused || v.ended || v.readyState === 0) return;
+      if (!fresh(5e3) || Date.now() - pipInputAt < 1e3 || nav.resumes >= 3 || !offVideoPage()) return;
       nav.resumes++;
       v.play()?.catch(() => {
       });
+    }
+    let reviveTimer;
+    function scheduleRevive() {
+      clearTimeout(reviveTimer);
+      reviveTimer = setTimeout(revive, 300);
+    }
+    function revive() {
+      const v = session.video();
+      if (!v || session.mode() !== "doc" || !nav.playing || !nav.id || v.readyState > 0) return;
+      if (!fresh(1e4) || Date.now() - pipInputAt < 1e3 || nav.revives >= 2 || !offVideoPage()) return;
+      nav.revives++;
+      const ok = adapter.reload?.(session.home(), nav.id, lastTime) ?? false;
+      debugLog(ok ? `영상 다시 불러오기 ${nav.id} @${Math.floor(lastTime)}초` : "다시 불러오기 실패(플레이어 API 없음)");
     }
     document.addEventListener("fullscreenchange", () => session.fullscreen(document.fullscreenElement));
     window.addEventListener("pagehide", () => config.flush());

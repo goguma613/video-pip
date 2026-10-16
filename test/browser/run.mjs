@@ -435,12 +435,12 @@ const navState = (page) => page.evaluate(() => ({
 for (const [name, opts, userPaused, debug] of [
   ['홈으로 가며 유튜브가 영상을 멈춰도 계속 재생', {}, false, false],
   ['이동이 끝난 뒤 늦게 멈춰도 계속 재생', { late: 300 }, false, false],
-  ['유튜브가 플레이어를 정지(영상 비움)시켜도 영상이 살아 있고 계속 재생', { stop: true }, false, true],
-  ['이동할 곳 정보가 없어도 정지를 막고 계속 재생', { stop: true, detail: false }, false, false],
-  ['늦게 정지시켜도 계속 재생', { stop: true, late: 300 }, false, false],
-  ['사용자가 멈춘 영상은 그대로 멈춤', {}, true, false],
+  ['유튜브가 영상을 비워도(실제 유튜브 방식) 같은 영상을 보던 위치부터 다시 불러와 재생', { unload: true, late: 300 }, false, true],
+  ['이동할 곳 정보가 없어도 다시 불러와 재생', { unload: true, late: 300, detail: false }, false, false],
+  ['사용자가 멈춘 영상은 그대로(다시 불러오지 않음)', { unload: true, late: 300 }, true, false],
 ]) {
   const page = await openNav(debug);
+  await page.waitForTimeout(1500); // 재생 위치를 조금 진행
   if (userPaused) {
     await pipEval(page, (w) => {
       const b = w.document.querySelector('.cb.big');
@@ -448,22 +448,28 @@ for (const [name, opts, userPaused, debug] of [
       b.click();
     });
   }
+  const t0 = await page.evaluate(() => window.watchVideo.currentTime);
   await page.evaluate((o) => window.toHome(o), opts);
-  await page.waitForTimeout((opts.late ?? 0) + 1000);
+  await page.waitForTimeout((opts.late ?? 0) + 1500);
   const r = await navState(page);
-  check(name, r.pip && r.same && r.hasSrc && r.path === '/' && r.playing === !userPaused, JSON.stringify(r));
+  const reloaded = await page.evaluate(() => window.__reloaded ?? null);
+  const t1 = await page.evaluate(() => window.watchVideo.currentTime);
+  const ok = userPaused
+    ? r.pip && r.same && !r.playing && reloaded === null
+    : r.pip && r.same && r.hasSrc && r.path === '/' && r.playing && (!opts.unload || (reloaded?.id === 'nav1' && Math.abs(reloaded.t - t0) <= 2 && t1 >= t0 - 2));
+  check(name, ok, JSON.stringify({ ...r, reloaded, t0: Math.round(t0 * 10) / 10, t1: Math.round(t1 * 10) / 10 }));
   await pipEval(page, (w) => w.close());
   await page.close();
 }
 {
   const page = await openNav();
-  await page.evaluate(() => window.stopTowardWatch());
-  await page.waitForTimeout(300);
-  check('다른 영상으로 가며 정지시키는 건 막지 않음', !(await navState(page)).hasSrc);
+  await page.evaluate(() => window.unloadTowardWatch());
+  await page.waitForTimeout(800);
+  check('다른 영상으로 가며 비우는 건 다시 불러오지 않음', (await page.evaluate(() => window.__reloaded ?? null)) === null);
   await pipEval(page, (w) => w.close());
   await page.close();
 }
-check('진단 모드: 유튜브가 보낸 명령이 콘솔에 기록됨', diagLines.some((l) => l.includes('일시정지로 대체')) && diagLines.some((l) => l.includes('페이지 이동 시작')), diagLines.slice(0, 5).join(' | '));
+check('진단 모드: 유튜브가 영상 요소에 한 일과 다시 불러오기가 기록됨', diagLines.some((l) => l.includes('video.removeAttribute')) && diagLines.some((l) => l.includes('영상 다시 불러오기')), diagLines.slice(0, 8).join(' | '));
 
 // ── G. 영상 없는 페이지 ──
 console.log('\nG. 영상 없는 페이지');

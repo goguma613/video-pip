@@ -1,7 +1,7 @@
 // 부트스트랩: 모듈을 연결만 한다.
 import { buildCommands, createKeymap } from './commands';
 import { createConfig, gmBackend, localBackend, safeLocalStorage, siteKey } from './config';
-import { traceNavigation } from './diag';
+import { debugLog, traceNavigation } from './diag';
 import { startLauncher, toast } from './launcher';
 import * as media from './media';
 import { mountPlayerUI } from './player-ui';
@@ -64,6 +64,11 @@ function boot(): void {
       // PiP 창 안의 영상이 비워지거나 멈추면(사이트가 다른 영상으로 갈아탐) 재연결 검사
       for (const type of ['emptied', 'pause', 'ended']) win.document.addEventListener(type, scheduleRebind, true);
       win.document.addEventListener('pause', keepAlive, true);
+      win.document.addEventListener('emptied', scheduleRevive, true);
+      win.document.addEventListener('timeupdate', () => {
+        const v = session.video();
+        if (v && v.readyState > 0 && !v.seeking) lastTime = v.currentTime; // 비워지기 직전 위치를 기억
+      }, true);
       // PiP 창에서 직접 조작한 시각(이때 멈춘 건 사용자가 멈춘 것)
       for (const type of ['pointerdown', 'keydown', 'wheel']) win.document.addEventListener(type, () => { pipInputAt = Date.now(); }, true);
       return ui;
@@ -89,38 +94,55 @@ function boot(): void {
     scheduleRebind();
     syncAutoPip();
     keepAlive();
+    scheduleRevive();
     setTimeout(keepAlive, 600); // 이동이 끝난 뒤 조금 늦게 멈추는 경우
   });
 
-  // 영상을 PiP로 보다가 홈·검색 등으로 가면 사이트(유튜브)가 플레이어를 정지시켜 영상을 비운다.
-  //  ① 이동하는 동안 정지 명령을 "일시정지"로 바꿔 영상 데이터를 지키고(어댑터)
-  //  ② 이동이 끝나면 이어서 재생한다.
-  // 이동 직전에 재생 중이었고, 영상 페이지가 아닌 곳으로 가고, 사용자가 PiP 창에서 직접 멈춘 게 아닐 때만.
-  let nav = { at: 0, playing: false, resumes: 0, toVideo: false };
+  // 영상을 PiP로 보다가 홈·검색 등으로 가면 유튜브가 영상을 멈추거나 아예 비운다(진단 기록으로 확인:
+  // 이동 약 1.3초 뒤 src 제거 + srcObject = null + load()).
+  //  · 멈추기만 하면 → 이어서 재생(keepAlive)
+  //  · 비우면 → 같은 플레이어에 같은 영상을 보던 위치부터 다시 불러온다(revive)
+  // 이동 직전에 재생 중이었고, 영상 페이지가 아닌 곳으로 갔고, 사용자가 PiP 창에서 직접 멈춘 게 아닐 때만.
+  let nav = { at: 0, playing: false, toVideo: false, resumes: 0, revives: 0, id: null as string | null };
   let pipInputAt = 0;
-  let unprotect: (() => void) | null = null;
-  const holding = () => session.mode() === 'doc' && nav.playing && !nav.toVideo && Date.now() - nav.at < 3000;
-  const ensureProtect = () => {
-    if (session.mode() === 'doc' && !unprotect) unprotect = adapter.protectOnNavigate?.(holding) ?? null;
-  };
-  session.subscribe((m) => {
-    if (m === 'doc') ensureProtect();
-    else if (m === 'idle' && unprotect) { unprotect(); unprotect = null; }
-  });
+  let lastTime = 0;
+  const fresh = (ms: number) => Date.now() - nav.at < ms;
+  const offVideoPage = () => !nav.toVideo && adapter.isVideoPage?.(location.pathname) === false;
   adapter.onNavigateStart?.((dest) => {
     const v = session.video();
     const doc = session.mode() === 'doc';
-    nav = { at: Date.now(), playing: doc && !!v && !v.paused && !v.ended, resumes: 0, toVideo: dest != null && !!adapter.isVideoPage?.(dest) };
-    if (doc) { ensureProtect(); traceNavigation(v, adapter.player?.() ?? null); }
+    nav = {
+      at: Date.now(),
+      playing: doc && !!v && !v.paused && !v.ended,
+      toVideo: dest != null && !!adapter.isVideoPage?.(dest),
+      resumes: 0,
+      revives: 0,
+      id: doc ? adapter.videoId?.(session.home()) ?? null : null,
+    };
+    if (!doc) return;
+    if (v) lastTime = v.currentTime;
+    traceNavigation(v, adapter.player?.() ?? null);
+    debugLog('PiP 상태', { id: nav.id, playing: nav.playing, toVideo: nav.toVideo, dest });
   });
   function keepAlive(): void {
     const v = session.video();
-    if (!v || session.mode() !== 'doc' || !nav.playing || !v.paused || v.ended) return;
-    const now = Date.now();
-    if (now - nav.at > 5000 || now - pipInputAt < 1000 || nav.resumes >= 3) return; // 사이트와 싸우지 않게 횟수 제한
-    if (nav.toVideo || adapter.isVideoPage?.(location.pathname) !== false) return;
+    if (!v || session.mode() !== 'doc' || !nav.playing || !v.paused || v.ended || v.readyState === 0) return;
+    if (!fresh(5000) || Date.now() - pipInputAt < 1000 || nav.resumes >= 3 || !offVideoPage()) return; // 사이트와 싸우지 않게 횟수 제한
     nav.resumes++;
     v.play()?.catch(() => {});
+  }
+  let reviveTimer: ReturnType<typeof setTimeout> | undefined;
+  function scheduleRevive(): void {
+    clearTimeout(reviveTimer);
+    reviveTimer = setTimeout(revive, 300);
+  }
+  function revive(): void {
+    const v = session.video();
+    if (!v || session.mode() !== 'doc' || !nav.playing || !nav.id || v.readyState > 0) return;
+    if (!fresh(10000) || Date.now() - pipInputAt < 1000 || nav.revives >= 2 || !offVideoPage()) return;
+    nav.revives++;
+    const ok = adapter.reload?.(session.home(), nav.id, lastTime) ?? false;
+    debugLog(ok ? `영상 다시 불러오기 ${nav.id} @${Math.floor(lastTime)}초` : '다시 불러오기 실패(플레이어 API 없음)');
   }
 
   // 페이지 전체화면 → 영상을 돌려보내 전체화면에서 보이게

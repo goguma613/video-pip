@@ -67,6 +67,14 @@
 | 🔸 브라우저 기본 PIP | 위 기능을 못 쓰는 브라우저, 다른 사이트에 끼워 넣은(iframe) 영상, DRM 보호 영상 |
 | ❌ 미지원 | Netflix · Disney+ (제외), 모바일 |
 
+## 🐞 문제 신고
+
+어떤 사이트에서 무엇을 했을 때 어떻게 됐는지 알려 주세요. 페이지를 이동할 때 PiP 영상이 멈추거나 검게 되는 문제라면 진단 기록이 큰 도움이 됩니다.
+
+1. 그 사이트에서 개발자 도구(`F12`) → Console 탭에 `localStorage.setItem('vpip:debug', '1')` 입력 → 새로고침
+2. 문제를 다시 재현한 뒤, 콘솔의 `[video-pip][진단]` 줄들을 복사해서 보내 주세요
+3. 끄기: `localStorage.removeItem('vpip:debug')`
+
 ## 🛠 만든 사람을 위한 메모
 
 설계는 [docs/DESIGN.md](docs/DESIGN.md), 출시 전 확인 목록은 [docs/QA.md](docs/QA.md)에 있습니다.

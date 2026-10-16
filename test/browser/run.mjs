@@ -49,7 +49,7 @@ await context.addInitScript(() => {
 const errors = [];
 context.on('page', (p) => {
   p.on('pageerror', (e) => errors.push(`${p.url()}: ${e.message}`));
-  p.on('console', (m) => { if (m.type() === 'error' || m.text().includes('[video-pip]')) errors.push(`${p.url()}: ${m.text()}`); });
+  p.on('console', (m) => { if (m.type() === 'error' || (m.text().includes('[video-pip]') && !m.text().includes('[진단]'))) errors.push(`${p.url()}: ${m.text()}`); });
 });
 
 const pipEval = (page, fn, arg) => page.evaluate(([src, a]) => {
@@ -413,13 +413,34 @@ console.log('\nI. 유튜브 일반 ↔ 쇼츠');
 
 // ── J. 유튜브: PiP로 보다가 홈으로 이동 ──
 console.log('\nJ. 유튜브 홈 이동');
-for (const [name, late, userPaused] of [['홈으로 가도 PiP 영상이 계속 재생', 0, false], ['이동이 끝난 뒤 늦게 멈춰도 계속 재생', 300, false], ['사용자가 멈춘 영상은 그대로 멈춤', 0, true]]) {
+const diagLines = [];
+const openNav = async (debug = false) => {
   const page = await context.newPage();
+  page.on('console', (m) => { if (m.text().includes('[진단]')) diagLines.push(m.text()); });
   await page.goto('https://www.youtube.com/watch?v=nav');
+  if (debug) { await page.evaluate(() => localStorage.setItem('vpip:debug', '1')); await page.reload(); }
   await waitPlaying(page, 'video');
   await page.mouse.click(1000, 700);
   await page.keyboard.press('Alt+KeyP');
   await page.waitForFunction(() => !!documentPictureInPicture.window?.document.querySelector('.stage video'), null, { timeout: 5000 });
+  return page;
+};
+const navState = (page) => page.evaluate(() => ({
+  pip: !!documentPictureInPicture.window,
+  same: documentPictureInPicture.window?.document.querySelector('video') === window.watchVideo,
+  playing: !window.watchVideo.paused,
+  hasSrc: window.watchVideo.getAttribute('src') !== null && window.watchVideo.readyState > 0, // 크롬은 비운 뒤에도 currentSrc를 남긴다
+  path: location.pathname,
+}));
+for (const [name, opts, userPaused, debug] of [
+  ['홈으로 가며 유튜브가 영상을 멈춰도 계속 재생', {}, false, false],
+  ['이동이 끝난 뒤 늦게 멈춰도 계속 재생', { late: 300 }, false, false],
+  ['유튜브가 플레이어를 정지(영상 비움)시켜도 영상이 살아 있고 계속 재생', { stop: true }, false, true],
+  ['이동할 곳 정보가 없어도 정지를 막고 계속 재생', { stop: true, detail: false }, false, false],
+  ['늦게 정지시켜도 계속 재생', { stop: true, late: 300 }, false, false],
+  ['사용자가 멈춘 영상은 그대로 멈춤', {}, true, false],
+]) {
+  const page = await openNav(debug);
   if (userPaused) {
     await pipEval(page, (w) => {
       const b = w.document.querySelector('.cb.big');
@@ -427,18 +448,22 @@ for (const [name, late, userPaused] of [['홈으로 가도 PiP 영상이 계속 
       b.click();
     });
   }
-  await page.evaluate((ms) => window.toHome(ms), late);
-  await page.waitForTimeout(late + 1000);
-  const r = await page.evaluate(() => ({
-    pip: !!documentPictureInPicture.window,
-    same: documentPictureInPicture.window?.document.querySelector('video') === window.watchVideo,
-    playing: !window.watchVideo.paused,
-    path: location.pathname,
-  }));
-  check(name, r.pip && r.same && r.path === '/' && r.playing === !userPaused, JSON.stringify(r));
+  await page.evaluate((o) => window.toHome(o), opts);
+  await page.waitForTimeout((opts.late ?? 0) + 1000);
+  const r = await navState(page);
+  check(name, r.pip && r.same && r.hasSrc && r.path === '/' && r.playing === !userPaused, JSON.stringify(r));
   await pipEval(page, (w) => w.close());
   await page.close();
 }
+{
+  const page = await openNav();
+  await page.evaluate(() => window.stopTowardWatch());
+  await page.waitForTimeout(300);
+  check('다른 영상으로 가며 정지시키는 건 막지 않음', !(await navState(page)).hasSrc);
+  await pipEval(page, (w) => w.close());
+  await page.close();
+}
+check('진단 모드: 유튜브가 보낸 명령이 콘솔에 기록됨', diagLines.some((l) => l.includes('일시정지로 대체')) && diagLines.some((l) => l.includes('페이지 이동 시작')), diagLines.slice(0, 5).join(' | '));
 
 // ── G. 영상 없는 페이지 ──
 console.log('\nG. 영상 없는 페이지');

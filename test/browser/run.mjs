@@ -471,6 +471,50 @@ for (const [name, opts, userPaused, debug] of [
 }
 check('진단 모드: 유튜브가 영상 요소에 한 일과 다시 불러오기가 기록됨', diagLines.some((l) => l.includes('video.removeAttribute')) && diagLines.some((l) => l.includes('영상 다시 불러오기')), diagLines.slice(0, 8).join(' | '));
 
+// ── K. 보이지 않는 자리로 돌아가는 영상 보호 ──
+console.log('\nK. 보이지 않는 자리 보호');
+const toastOf = (page) => page.evaluate(() => {
+  const t = document.querySelector('video-pip-ui')?.shadowRoot?.querySelector('.toast.show');
+  return t ? { text: t.textContent, button: t.querySelector('.tbtn')?.textContent ?? null } : null;
+});
+{
+  const page = await context.newPage();
+  await page.goto('https://site.test/inflow.html');
+  await waitPlaying(page, '#v');
+  await page.mouse.click(1000, 700);
+  await page.keyboard.press('Alt+KeyP');
+  await page.waitForFunction(() => !!documentPictureInPicture.window?.document.querySelector('.stage video'), null, { timeout: 5000 });
+  await page.evaluate(() => { document.getElementById('art').style.display = 'none'; }); // PiP 중 원래 자리가 숨겨짐
+  await pipEval(page, (w) => w.document.querySelector('.ib[aria-label^="닫기"]').click());
+  await page.waitForTimeout(500);
+  const r = await page.evaluate(() => ({ paused: document.getElementById('v').paused }));
+  const t = await toastOf(page);
+  check('숨겨진 자리로 돌아간 영상은 멈춤(소리만 나지 않게)', r.paused, JSON.stringify(r));
+  check('알림 표시(일반 사이트는 버튼 없음)', !!t && t.text.includes('일시정지') && t.button === null, JSON.stringify(t));
+  await page.evaluate(() => { document.getElementById('art').style.display = ''; });
+  await page.close();
+}
+{
+  const page = await openNav();
+  await page.waitForTimeout(1500);
+  await page.evaluate(() => window.toHome({ unload: true, late: 300 }));
+  await page.waitForTimeout(1800);
+  check('유튜브 홈에서 다시 불러와 재생 중', await page.evaluate(() => !window.watchVideo.paused));
+  const at = await page.evaluate(() => window.watchVideo.currentTime);
+  await pipEval(page, (w) => w.document.querySelector('.ib[aria-label^="닫기"]').click());
+  await page.waitForTimeout(500);
+  const r = await page.evaluate(() => ({ paused: window.watchVideo.paused, hidden: !window.watchVideo.checkVisibility() }));
+  const t = await toastOf(page);
+  check('유튜브 홈에서 PiP를 닫으면 영상은 멈춤(숨겨진 시청 화면에서 소리 안 남)', r.paused && r.hidden, JSON.stringify(r));
+  check('알림에 "영상으로 가기" 버튼', t?.button === '영상으로 가기', JSON.stringify(t));
+  await page.evaluate(() => document.querySelector('video-pip-ui').shadowRoot.querySelector('.tbtn').click());
+  await page.waitForURL(/\/watch\?v=nav1&t=\d+s/, { timeout: 5000 }).catch(() => {});
+  const u = new URL(page.url());
+  const sec = parseInt(u.searchParams.get('t'), 10);
+  check('버튼 → 그 영상의 보던 위치로 이동', u.pathname === '/watch' && u.searchParams.get('v') === 'nav1' && Math.abs(sec - at) <= 2, page.url());
+  await page.close();
+}
+
 // ── G. 영상 없는 페이지 ──
 console.log('\nG. 영상 없는 페이지');
 {

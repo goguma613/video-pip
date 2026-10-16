@@ -2,7 +2,7 @@
 // @name           🎬 고화질 영상 PIP (Picture-in-Picture)
 // @name:en        HD Video Picture-in-Picture
 // @namespace      https://github.com/goguma613/video-pip
-// @version        2.0.4
+// @version        2.0.5
 // @description    영상을 원본 화질 그대로 항상 위에 뜨는 작은 창으로. 영상 위 ⧉ 버튼 또는 Alt+P 한 번이면 끝.
 // @description:en Pop any video into an always-on-top window at original quality (Document Picture-in-Picture). Hover button or Alt+P.
 // @author         goguma613
@@ -408,7 +408,7 @@
   }
 
   // src/styles/page.css
-  var page_default = "/* 원본 페이지에 띄우는 것(⧉ 버튼, 알림). Shadow Root 안이라 사이트 CSS와 섞이지 않는다. */\n:host {\n  all: initial !important;\n  position: fixed !important; top: 0 !important; left: 0 !important;\n  width: 0 !important; height: 0 !important;\n  z-index: 2147483647 !important; pointer-events: none !important;\n}\n* { box-sizing: border-box; }\n.chip {\n  position: fixed; top: 0; right: 0; display: flex; align-items: center; gap: 0; height: 30px; padding: 0 7px;\n  border: 1px solid rgba(255, 255, 255, .2); border-radius: 15px; background: rgba(16, 19, 26, .78);\n  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); box-shadow: 0 2px 10px rgba(0, 0, 0, .35);\n  color: #fff; font: 600 12px/1 system-ui, -apple-system, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;\n  cursor: pointer; pointer-events: auto;\n  opacity: 0; visibility: hidden; transform: translateY(-4px);\n  transition: opacity .15s, transform .15s, visibility 0s linear .15s, background .15s;\n}\n.chip.show { opacity: 1; visibility: visible; transform: none; transition: opacity .15s, transform .15s, visibility 0s, background .15s; }\n.chip:hover, .chip:focus-visible { background: rgba(79, 157, 255, .95); gap: 6px; }\n.chip:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }\n.chip svg { display: block; width: 16px; height: 16px; flex: none; }\n.chip .lbl { max-width: 0; overflow: hidden; white-space: nowrap; transition: max-width .2s; }\n.chip:hover .lbl, .chip:focus-visible .lbl { max-width: 64px; }\n\n.toast {\n  position: fixed; left: 50%; bottom: 32px; max-width: min(520px, calc(100vw - 32px)); transform: translate(-50%, 8px);\n  padding: 10px 16px; border-radius: 12px; background: rgba(16, 19, 26, .94); border: 1px solid rgba(255, 255, 255, .12);\n  box-shadow: 0 10px 30px rgba(0, 0, 0, .45); color: #f1f4f8; text-align: center;\n  font: 600 13px/1.45 system-ui, -apple-system, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;\n  opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none;\n}\n.toast.show { opacity: 1; transform: translate(-50%, 0); }\n@media (prefers-reduced-motion: reduce) { .chip, .chip .lbl, .toast { transition: none !important; } }\n";
+  var page_default = "/* 원본 페이지에 띄우는 것(⧉ 버튼, 알림). Shadow Root 안이라 사이트 CSS와 섞이지 않는다. */\n:host {\n  all: initial !important;\n  position: fixed !important; top: 0 !important; left: 0 !important;\n  width: 0 !important; height: 0 !important;\n  z-index: 2147483647 !important; pointer-events: none !important;\n}\n* { box-sizing: border-box; }\n.chip {\n  position: fixed; top: 0; right: 0; display: flex; align-items: center; gap: 0; height: 30px; padding: 0 7px;\n  border: 1px solid rgba(255, 255, 255, .2); border-radius: 15px; background: rgba(16, 19, 26, .78);\n  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); box-shadow: 0 2px 10px rgba(0, 0, 0, .35);\n  color: #fff; font: 600 12px/1 system-ui, -apple-system, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;\n  cursor: pointer; pointer-events: auto;\n  opacity: 0; visibility: hidden; transform: translateY(-4px);\n  transition: opacity .15s, transform .15s, visibility 0s linear .15s, background .15s;\n}\n.chip.show { opacity: 1; visibility: visible; transform: none; transition: opacity .15s, transform .15s, visibility 0s, background .15s; }\n.chip:hover, .chip:focus-visible { background: rgba(79, 157, 255, .95); gap: 6px; }\n.chip:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }\n.chip svg { display: block; width: 16px; height: 16px; flex: none; }\n.chip .lbl { max-width: 0; overflow: hidden; white-space: nowrap; transition: max-width .2s; }\n.chip:hover .lbl, .chip:focus-visible .lbl { max-width: 64px; }\n\n.toast {\n  position: fixed; left: 50%; bottom: 32px; max-width: min(520px, calc(100vw - 32px)); transform: translate(-50%, 8px);\n  padding: 10px 16px; border-radius: 12px; background: rgba(16, 19, 26, .94); border: 1px solid rgba(255, 255, 255, .12);\n  box-shadow: 0 10px 30px rgba(0, 0, 0, .45); color: #f1f4f8; text-align: center;\n  font: 600 13px/1.45 system-ui, -apple-system, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;\n  opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none;\n}\n.toast.show { opacity: 1; transform: translate(-50%, 0); }\n.toast.act { display: flex; align-items: center; gap: 12px; text-align: left; }\n.toast.act.show { pointer-events: auto; }\n.tbtn { flex: none; padding: 6px 12px; border: 0; border-radius: 8px; background: #4f9dff; color: #fff; font: inherit; cursor: pointer; }\n.tbtn:hover { filter: brightness(1.1); }\n.tbtn:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }\n@media (prefers-reduced-motion: reduce) { .chip, .chip .lbl, .toast { transition: none !important; } }\n";
 
   // src/dom.ts
   function h(doc, tag, attrs, ...children) {
@@ -480,7 +480,7 @@
   function layer(doc) {
     if (!root || !host) {
       host = doc.createElement("video-pip-ui");
-      root = host.attachShadow({ mode: "closed" });
+      root = host.attachShadow({ mode: "open" });
       adoptCss(root, page_default);
     }
     if (!host.isConnected) doc.documentElement.append(host);
@@ -488,17 +488,25 @@
   }
   var toastEl = null;
   var toastTimer;
-  function toast(doc, msg) {
+  function toast(doc, msg, action) {
     const r = layer(doc);
     if (!toastEl) {
       toastEl = h(doc, "div", { class: "toast", role: "status" });
       r.append(toastEl);
     }
     const el = toastEl;
-    el.textContent = msg;
+    const hide = () => el.classList.remove("show");
+    el.replaceChildren(h(doc, "span", { text: msg }));
+    el.classList.toggle("act", !!action);
+    if (action) {
+      el.append(h(doc, "button", { class: "tbtn", type: "button", text: action.label, onclick: () => {
+        hide();
+        action.run();
+      } }));
+    }
     requestAnimationFrame(() => el.classList.add("show"));
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => el.classList.remove("show"), 3200);
+    toastTimer = setTimeout(hide, action ? 7e3 : 3200);
   }
   function startLauncher(doc, deps) {
     let chip = null;
@@ -865,7 +873,7 @@
         () => config.siteDisabled(),
         (off) => config.setSiteDisabled(off)
       ),
-      h(doc, "div", { class: "ver", text: `v${"2.0.4"} · Alt+P로 언제든 켜고 끌 수 있어요` })
+      h(doc, "div", { class: "ver", text: `v${"2.0.5"} · Alt+P로 언제든 켜고 끌 수 있어요` })
     );
     const sync = () => opts.forEach((o) => o.el.setAttribute("aria-checked", String(o.get())));
     sync();
@@ -913,8 +921,13 @@
   function moveTo(token, slot) {
     slot.append(token.video);
   }
+  function isHidden(el) {
+    if (!el.isConnected) return true;
+    if (typeof el.checkVisibility === "function") return !el.checkVisibility();
+    return el.getClientRects().length === 0;
+  }
   function restore(token) {
-    if (token.done) return;
+    if (token.done) return { wasPlaying: false, hidden: false };
     token.done = true;
     const { video, anchor, spacer, parent } = token;
     const wasPlaying = !video.paused && !video.ended;
@@ -923,12 +936,16 @@
     else video.remove();
     anchor.remove();
     spacer?.remove();
-    if (wasPlaying && video.isConnected) {
+    const hidden = isHidden(video);
+    if (hidden) {
+      if (!video.paused) video.pause();
+    } else if (wasPlaying) {
       setTimeout(() => {
-        if (video.paused && !video.ended) video.play()?.catch(() => {
+        if (video.paused && !video.ended && !isHidden(video)) video.play()?.catch(() => {
         });
       }, 200);
     }
+    return { wasPlaying, hidden };
   }
 
   // src/session.ts
@@ -973,8 +990,14 @@
         warn(e);
       }
       if (a.token) {
-        restore(a.token);
+        const home = a.token.anchor.parentNode ?? a.token.parent;
+        const result = restore(a.token);
         window.dispatchEvent(new Event("resize"));
+        try {
+          deps.onRestored?.(a.video, result, home);
+        } catch (e) {
+          warn(e);
+        }
       }
       emit();
     }
@@ -1154,6 +1177,10 @@
       return location.pathname === "/watch" ? new URLSearchParams(location.search).get("v") : null;
     },
     // 유튜브는 시청 페이지를 떠나면 영상 요소를 직접 비운다(src 제거 + load). 같은 플레이어에 다시 불러온다
+    watchUrl(home, at) {
+      const id = youtube.videoId(home);
+      return id ? `/watch?v=${encodeURIComponent(id)}&t=${Math.max(0, Math.floor(at))}s` : null;
+    },
     reload(home, id, at) {
       const p = ownerPlayer(home);
       if (typeof p?.loadVideoById !== "function") return false;
@@ -1262,7 +1289,7 @@
   function boot() {
     const w = window;
     if (w.__videoPip) return;
-    w.__videoPip = "2.0.4";
+    w.__videoPip = "2.0.5";
     const top = isTopFrame();
     const adapter = pickAdapter(location);
     const local = safeLocalStorage();
@@ -1328,7 +1355,17 @@
         if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {
         });
       },
-      toast: (msg) => toast(document, msg)
+      toast: (msg) => toast(document, msg),
+      // 보이지 않는 자리로 돌아가 영상을 멈췄으면 알리고, 가능하면 그 영상으로 돌아갈 수 있게
+      onRestored(v, result, home) {
+        if (!result.wasPlaying || !result.hidden) return;
+        const url = adapter.watchUrl?.(home, v.currentTime) ?? null;
+        toast(
+          document,
+          "PiP를 닫아서 영상을 일시정지했어요.",
+          url ? { label: "영상으로 가기", run: () => location.assign(url) } : void 0
+        );
+      }
     });
     const keymap = createKeymap(buildCommands(session));
     window.addEventListener("keydown", (e) => keymap.handle(e, "global"), true);

@@ -30,4 +30,9 @@
   opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none;
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.act { display: flex; align-items: center; gap: 12px; text-align: left; }
+.toast.act.show { pointer-events: auto; }
+.tbtn { flex: none; padding: 6px 12px; border: 0; border-radius: 8px; background: #4f9dff; color: #fff; font: inherit; cursor: pointer; }
+.tbtn:hover { filter: brightness(1.1); }
+.tbtn:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
 @media (prefers-reduced-motion: reduce) { .chip, .chip .lbl, .toast { transition: none !important; } }

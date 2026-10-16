@@ -35,6 +35,8 @@ export interface SessionDeps {
   requestLegacy(video: HTMLVideoElement): Promise<void>;
   exitLegacy(): void;
   toast(msg: string): void;
+  /** PiP를 닫고 영상을 돌려놓은 뒤(home = 돌아간 자리) */
+  onRestored?(video: HTMLVideoElement, result: dock.RestoreResult, home: Node | null): void;
 }
 
 export interface Session {
@@ -93,8 +95,10 @@ export function createSession(deps: SessionDeps): Session {
     for (const fn of a.cleanup) { try { fn(); } catch (e) { warn(e); } }
     try { a.ui?.destroy(); } catch (e) { warn(e); }
     if (a.token) {
-      dock.restore(a.token);
+      const home = a.token.anchor.parentNode ?? a.token.parent;
+      const result = dock.restore(a.token);
       window.dispatchEvent(new Event('resize')); // 사이트 플레이어가 크기를 다시 계산하게
+      try { deps.onRestored?.(a.video, result, home); } catch (e) { warn(e); }
     }
     emit();
   }

@@ -201,12 +201,12 @@ export function createSession(deps: SessionDeps): Session {
       const cur = a.video;
       const homeGone = !a.token.anchor.isConnected;
       const sourceGone = cur.readyState === 0 && !cur.currentSrc && !cur.srcObject;
-      let next: HTMLVideoElement | null = null;
-      // ① 사이트가 원래 자리나 영상 소스를 없앴다(SPA) → 가장 알맞은 영상으로
-      if (homeGone || sourceGone) next = deps.pick();
-      // ② 사이트가 PiP 영상을 멈추고 다른 영상을 틀었다(유튜브 일반 ↔ 쇼츠는 플레이어가 따로) → 그 영상을 따라감
-      //    PiP 영상을 보는 중(재생 중)이면 절대 바꾸지 않는다. 같은 요소를 재사용하는 경우(유튜브 다음 영상)는 해당 없음
-      else if (cur.paused || cur.ended) next = deps.follow();
+      // 갈아 끼우는 경우: 사이트가 원래 자리나 영상 소스를 없앴거나(SPA), PiP 영상을 멈추고 다른 영상을 틀었을 때
+      // (유튜브 일반 ↔ 쇼츠는 플레이어가 따로). PiP 영상을 보는 중(재생 중)이고 원래 자리도 살아 있으면 바꾸지 않는다.
+      if (!homeGone && !sourceGone && !cur.paused && !cur.ended) return;
+      // 대상은 언제나 페이지의 "주인공" 영상(재생 중 · 크게 보임 · 소리 남)만 — 미리보기 같은 아무 영상이나 집어 오지 않게.
+      // 그런 영상이 없으면 지금 PiP 영상을 그대로 둔다(유튜브가 비운 영상은 keepalive가 다시 불러온다).
+      const next = deps.follow();
       if (!next || next === cur) return;
       dock.restore(a.token);
       a.token = dock.detach(next);

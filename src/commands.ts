@@ -90,9 +90,10 @@ export function createKeymap(commands: Command[]): Keymap {
   }
   return {
     handle(e, scope) {
-      if (e.isComposing || isEditable(e.composedPath?.()[0] ?? e.target)) return false;
+      // 등록된 키인지부터(대부분의 키는 여기서 끝) → 그다음 입력창 검사
       const c = byKey.get(comboOf(e));
       if (!c || (scope === 'global' && c.scope !== 'global')) return false;
+      if (e.isComposing || isEditable(e.composedPath?.()[0] ?? e.target)) return false;
       e.preventDefault();
       e.stopImmediatePropagation();
       if (!e.repeat || c.repeat) c.run();

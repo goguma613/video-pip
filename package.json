@@ -1,6 +1,6 @@
 {
   "name": "video-pip",
-  "version": "2.0.5",
+  "version": "2.0.6",
   "private": true,
   "description": "원본 화질 그대로 영상을 항상 위에 뜨는 작은 창으로 — Document Picture-in-Picture 유저스크립트",
   "type": "module",

@@ -7,6 +7,7 @@ const enabled = (() => {
 })();
 
 let t0 = Date.now();
+let tracing = false; // 기록 중에 또 이동하면 겹쳐 감싸지 않는다
 
 export function debugLog(...args: unknown[]): void {
   if (enabled) console.log('[video-pip][진단]', `+${Date.now() - t0}ms`, ...args);
@@ -21,6 +22,8 @@ const short = (x: unknown): unknown => {
 /** 페이지 이동 직후 ms 동안 영상 요소와 사이트 플레이어 객체에 대한 호출을 기록한다. */
 export function traceNavigation(video: HTMLVideoElement | null, player: object | null, ms = 6000): void {
   if (!enabled) return;
+  if (tracing) { debugLog('페이지 이동(기록 중)', location.href); return; }
+  tracing = true;
   t0 = Date.now();
   debugLog('페이지 이동 시작', location.href, video
     ? { paused: video.paused, readyState: video.readyState, src: short(video.currentSrc) }
@@ -69,6 +72,7 @@ export function traceNavigation(video: HTMLVideoElement | null, player: object |
   }
   setTimeout(() => {
     undo.forEach((f) => f());
+    tracing = false;
     debugLog('진단 끝 — 위의 [video-pip][진단] 줄들을 복사해서 보내 주세요');
   }, ms);
 }

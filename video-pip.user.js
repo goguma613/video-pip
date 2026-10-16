@@ -2,7 +2,7 @@
 // @name           🎬 고화질 영상 PIP (Picture-in-Picture)
 // @name:en        HD Video Picture-in-Picture
 // @namespace      https://github.com/goguma613/video-pip
-// @version        2.0.5
+// @version        2.0.6
 // @description    영상을 원본 화질 그대로 항상 위에 뜨는 작은 창으로. 영상 위 ⧉ 버튼 또는 Alt+P 한 번이면 끝.
 // @description:en Pop any video into an always-on-top window at original quality (Document Picture-in-Picture). Hover button or Alt+P.
 // @author         goguma613
@@ -180,9 +180,9 @@
     }
     return {
       handle(e, scope) {
-        if (e.isComposing || isEditable(e.composedPath?.()[0] ?? e.target)) return false;
         const c = byKey.get(comboOf(e));
         if (!c || scope === "global" && c.scope !== "global") return false;
+        if (e.isComposing || isEditable(e.composedPath?.()[0] ?? e.target)) return false;
         e.preventDefault();
         e.stopImmediatePropagation();
         if (!e.repeat || c.repeat) c.run();
@@ -335,6 +335,7 @@
     }
   })();
   var t0 = Date.now();
+  var tracing = false;
   function debugLog(...args) {
     if (enabled) console.log("[video-pip][진단]", `+${Date.now() - t0}ms`, ...args);
   }
@@ -345,6 +346,11 @@
   };
   function traceNavigation(video, player, ms = 6e3) {
     if (!enabled) return;
+    if (tracing) {
+      debugLog("페이지 이동(기록 중)", location.href);
+      return;
+    }
+    tracing = true;
     t0 = Date.now();
     debugLog("페이지 이동 시작", location.href, video ? { paused: video.paused, readyState: video.readyState, src: short(video.currentSrc) } : "PiP 영상 없음");
     const undo = [];
@@ -403,8 +409,77 @@
     }
     setTimeout(() => {
       undo.forEach((f) => f());
+      tracing = false;
       debugLog("진단 끝 — 위의 [video-pip][진단] 줄들을 복사해서 보내 주세요");
     }, ms);
+  }
+
+  // src/keepalive.ts
+  function startKeepAlive(session, adapter) {
+    if (!adapter.onNavigateStart || !adapter.isVideoPage) return { attach() {
+    } };
+    const isVideoPage = adapter.isVideoPage;
+    let nav = { at: 0, playing: false, toVideo: false, resumes: 0, revives: 0, id: null };
+    let inputAt = 0;
+    let lastTime = 0;
+    let reviveTimer;
+    const pipVideo = () => session.mode() === "doc" ? session.video() : null;
+    const fresh = (ms) => Date.now() - nav.at < ms;
+    const userJustActed = () => Date.now() - inputAt < 1e3;
+    const offVideoPage = () => !nav.toVideo && !isVideoPage(location.pathname);
+    adapter.onNavigateStart((dest) => {
+      const v = pipVideo();
+      nav = {
+        at: Date.now(),
+        playing: !!v && !v.paused && !v.ended,
+        toVideo: dest != null && isVideoPage(dest),
+        resumes: 0,
+        revives: 0,
+        id: v ? adapter.videoId?.(session.home()) ?? null : null
+      };
+      if (!v) return;
+      lastTime = v.currentTime;
+      traceNavigation(v, adapter.player?.() ?? null);
+      debugLog("PiP 상태", { id: nav.id, playing: nav.playing, toVideo: nav.toVideo, dest });
+    });
+    function resume() {
+      const v = pipVideo();
+      if (!v || !nav.playing || !v.paused || v.ended || v.readyState === 0) return;
+      if (!fresh(5e3) || userJustActed() || nav.resumes >= 3 || !offVideoPage()) return;
+      nav.resumes++;
+      v.play()?.catch(() => {
+      });
+    }
+    function revive() {
+      const v = pipVideo();
+      if (!v || !nav.playing || !nav.id || v.readyState > 0) return;
+      if (!fresh(1e4) || userJustActed() || nav.revives >= 2 || !offVideoPage()) return;
+      nav.revives++;
+      const ok = adapter.reload?.(session.home(), nav.id, lastTime) ?? false;
+      debugLog(ok ? `영상 다시 불러오기 ${nav.id} @${Math.floor(lastTime)}초` : "다시 불러오기 실패(플레이어 API 없음)");
+    }
+    const scheduleRevive = () => {
+      clearTimeout(reviveTimer);
+      reviveTimer = setTimeout(revive, 300);
+    };
+    adapter.onNavigate?.(() => {
+      resume();
+      scheduleRevive();
+      setTimeout(resume, 600);
+    });
+    return {
+      attach(d) {
+        d.addEventListener("pause", resume, true);
+        d.addEventListener("emptied", scheduleRevive, true);
+        d.addEventListener("timeupdate", () => {
+          const v = pipVideo();
+          if (v && v.readyState > 0 && !v.seeking) lastTime = v.currentTime;
+        }, true);
+        for (const type of ["pointerdown", "keydown", "wheel"]) d.addEventListener(type, () => {
+          inputAt = Date.now();
+        }, true);
+      }
+    };
   }
 
   // src/styles/page.css
@@ -488,6 +563,7 @@
   }
   var toastEl = null;
   var toastTimer;
+  var pendingReveal = null;
   function toast(doc, msg, action) {
     const r = layer(doc);
     if (!toastEl) {
@@ -496,6 +572,10 @@
     }
     const el = toastEl;
     const hide = () => el.classList.remove("show");
+    clearTimeout(toastTimer);
+    if (pendingReveal) doc.removeEventListener("visibilitychange", pendingReveal);
+    pendingReveal = null;
+    hide();
     el.replaceChildren(h(doc, "span", { text: msg }));
     el.classList.toggle("act", !!action);
     if (action) {
@@ -504,9 +584,23 @@
         action.run();
       } }));
     }
-    requestAnimationFrame(() => el.classList.add("show"));
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(hide, action ? 7e3 : 3200);
+    const reveal = () => {
+      void el.offsetWidth;
+      el.classList.add("show");
+      toastTimer = setTimeout(hide, action ? 7e3 : 3200);
+    };
+    if (doc.hidden) {
+      const onVisible = () => {
+        if (doc.hidden) return;
+        doc.removeEventListener("visibilitychange", onVisible);
+        pendingReveal = null;
+        reveal();
+      };
+      pendingReveal = onVisible;
+      doc.addEventListener("visibilitychange", onVisible);
+    } else {
+      reveal();
+    }
   }
   function startLauncher(doc, deps) {
     let chip = null;
@@ -873,7 +967,7 @@
         () => config.siteDisabled(),
         (off) => config.setSiteDisabled(off)
       ),
-      h(doc, "div", { class: "ver", text: `v${"2.0.5"} · Alt+P로 언제든 켜고 끌 수 있어요` })
+      h(doc, "div", { class: "ver", text: `v${"2.0.6"} · Alt+P로 언제든 켜고 끌 수 있어요` })
     );
     const sync = () => opts.forEach((o) => o.el.setAttribute("aria-checked", String(o.get())));
     sync();
@@ -1104,9 +1198,8 @@
         const cur = a.video;
         const homeGone = !a.token.anchor.isConnected;
         const sourceGone = cur.readyState === 0 && !cur.currentSrc && !cur.srcObject;
-        let next = null;
-        if (homeGone || sourceGone) next = deps.pick();
-        else if (cur.paused || cur.ended) next = deps.follow();
+        if (!homeGone && !sourceGone && !cur.paused && !cur.ended) return;
+        const next = deps.follow();
         if (!next || next === cur) return;
         restore(a.token);
         a.token = detach(next);
@@ -1289,12 +1382,13 @@
   function boot() {
     const w = window;
     if (w.__videoPip) return;
-    w.__videoPip = "2.0.5";
+    w.__videoPip = "2.0.6";
     const top = isTopFrame();
     const adapter = pickAdapter(location);
     const local = safeLocalStorage();
     const config = createConfig(gmBackend() ?? localBackend(local), siteKey(location.hostname), local);
     const tracker = createTracker(document, adapter);
+    const saveLongEdge = debounce((edge) => config.set({ pipLongEdge: edge }), 500);
     const session = createSession({
       pick: () => tracker.pick(),
       follow: () => {
@@ -1328,9 +1422,10 @@
             if (!adapter.toLiveEdge?.(x)) toLiveEdge(x);
           }
         });
-        win.addEventListener("resize", debounce(() => {
-          config.set({ pipLongEdge: Math.max(win.innerWidth, win.innerHeight) });
-        }, 500));
+        win.addEventListener("resize", () => {
+          const edge = Math.max(win.innerWidth, win.innerHeight);
+          if (edge > 0) saveLongEdge(edge);
+        });
         const titleEl = document.querySelector("head > title");
         if (titleEl) {
           const mo = new MutationObserver(() => session.refreshTitle());
@@ -1338,15 +1433,7 @@
           win.addEventListener("pagehide", () => mo.disconnect(), { once: true });
         }
         for (const type of ["emptied", "pause", "ended"]) win.document.addEventListener(type, scheduleRebind, true);
-        win.document.addEventListener("pause", keepAlive, true);
-        win.document.addEventListener("emptied", scheduleRevive, true);
-        win.document.addEventListener("timeupdate", () => {
-          const v2 = session.video();
-          if (v2 && v2.readyState > 0 && !v2.seeking) lastTime = v2.currentTime;
-        }, true);
-        for (const type of ["pointerdown", "keydown", "wheel"]) win.document.addEventListener(type, () => {
-          pipInputAt = Date.now();
-        }, true);
+        keepAlive.attach(win.document);
         return ui;
       },
       legacyAvailable: (v) => document.pictureInPictureEnabled && !v.disablePictureInPicture,
@@ -1368,69 +1455,29 @@
       }
     });
     const keymap = createKeymap(buildCommands(session));
+    const keepAlive = startKeepAlive(session, adapter);
     window.addEventListener("keydown", (e) => keymap.handle(e, "global"), true);
     let rebindTimer;
     function scheduleRebind() {
+      if (session.mode() !== "doc") return;
       clearTimeout(rebindTimer);
       rebindTimer = setTimeout(() => session.rebind(), 50);
     }
     for (const type of ["loadedmetadata", "play", "playing", "emptied"]) document.addEventListener(type, scheduleRebind, true);
     adapter.onNavigate?.(() => {
       scheduleRebind();
-      syncAutoPip();
-      keepAlive();
-      scheduleRevive();
-      setTimeout(keepAlive, 600);
+      syncAutoPip(true);
     });
-    let nav = { at: 0, playing: false, toVideo: false, resumes: 0, revives: 0, id: null };
-    let pipInputAt = 0;
-    let lastTime = 0;
-    const fresh = (ms) => Date.now() - nav.at < ms;
-    const offVideoPage = () => !nav.toVideo && adapter.isVideoPage?.(location.pathname) === false;
-    adapter.onNavigateStart?.((dest) => {
-      const v = session.video();
-      const doc = session.mode() === "doc";
-      nav = {
-        at: Date.now(),
-        playing: doc && !!v && !v.paused && !v.ended,
-        toVideo: dest != null && !!adapter.isVideoPage?.(dest),
-        resumes: 0,
-        revives: 0,
-        id: doc ? adapter.videoId?.(session.home()) ?? null : null
-      };
-      if (!doc) return;
-      if (v) lastTime = v.currentTime;
-      traceNavigation(v, adapter.player?.() ?? null);
-      debugLog("PiP 상태", { id: nav.id, playing: nav.playing, toVideo: nav.toVideo, dest });
-    });
-    function keepAlive() {
-      const v = session.video();
-      if (!v || session.mode() !== "doc" || !nav.playing || !v.paused || v.ended || v.readyState === 0) return;
-      if (!fresh(5e3) || Date.now() - pipInputAt < 1e3 || nav.resumes >= 3 || !offVideoPage()) return;
-      nav.resumes++;
-      v.play()?.catch(() => {
-      });
-    }
-    let reviveTimer;
-    function scheduleRevive() {
-      clearTimeout(reviveTimer);
-      reviveTimer = setTimeout(revive, 300);
-    }
-    function revive() {
-      const v = session.video();
-      if (!v || session.mode() !== "doc" || !nav.playing || !nav.id || v.readyState > 0) return;
-      if (!fresh(1e4) || Date.now() - pipInputAt < 1e3 || nav.revives >= 2 || !offVideoPage()) return;
-      nav.revives++;
-      const ok = adapter.reload?.(session.home(), nav.id, lastTime) ?? false;
-      debugLog(ok ? `영상 다시 불러오기 ${nav.id} @${Math.floor(lastTime)}초` : "다시 불러오기 실패(플레이어 API 없음)");
-    }
     document.addEventListener("fullscreenchange", () => session.fullscreen(document.fullscreenElement));
-    window.addEventListener("pagehide", () => config.flush());
+    window.addEventListener("pagehide", () => {
+      saveLongEdge.flush();
+      config.flush();
+    });
     let autoRegistered = false;
-    function syncAutoPip() {
+    function syncAutoPip(reassert = false) {
       if (!top || !("mediaSession" in navigator)) return;
       const on = config.get().autoTabPip && !config.siteDisabled();
-      if (!on && !autoRegistered) return;
+      if (on === autoRegistered && !(on && reassert)) return;
       try {
         navigator.mediaSession.setActionHandler(
           "enterpictureinpicture",
@@ -1443,7 +1490,7 @@
       }
     }
     syncAutoPip();
-    config.subscribe(syncAutoPip);
+    config.subscribe(() => syncAutoPip());
     startLauncher(document, {
       tracker,
       enabled: () => config.get().launcher && !config.siteDisabled(),

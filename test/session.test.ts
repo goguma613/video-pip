@@ -160,18 +160,28 @@ describe('Session', () => {
 
   it('사이트가 영상의 원래 자리를 없애고 새 영상을 띄우면 새 영상으로 갈아 끼운다', async () => {
     const next = document.createElement('video');
-    let current: HTMLVideoElement | null = null;
-    const t = setup({ pick: () => current });
-    current = t.video;
+    let lead: HTMLVideoElement | null = null; // 페이지의 주인공 영상
+    const t = setup({ follow: () => lead });
     await t.session.open();
     t.box.remove();                 // SPA가 이전 플레이어를 통째로 지움
     document.body.append(next);
-    current = next;
+    lead = next;
     t.session.rebind();
     expect(t.session.video()).toBe(next);
     expect(next.ownerDocument).toBe(t.wins[0].document);
     expect(t.uis[0].setVideo).toHaveBeenCalledWith(next);
     expect(t.video.isConnected).toBe(false);
+  });
+
+  it('원래 자리가 사라져도 주인공 영상이 없으면 아무 영상이나 집어 오지 않고 그대로 둔다', async () => {
+    const preview = document.createElement('video'); // 예: 작은 미리보기 — pick()으론 잡히지만 주인공은 아님
+    const t = setup({ pick: () => preview, follow: () => null });
+    await t.session.open(t.video);
+    t.box.remove();
+    document.body.append(preview);
+    t.session.rebind();
+    expect(t.session.video()).toBe(t.video);
+    expect(t.video.ownerDocument).toBe(t.wins[0].document);
   });
 
   it('원래 자리가 살아 있으면 갈아 끼우지 않는다(유튜브처럼 같은 영상 요소 재사용)', async () => {

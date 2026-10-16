@@ -21,6 +21,7 @@ function layer(doc: Document): ShadowRoot {
 
 let toastEl: HTMLElement | null = null;
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
+let pendingReveal: (() => void) | null = null;
 
 export interface ToastAction {
   label: string;
@@ -36,14 +37,33 @@ export function toast(doc: Document, msg: string, action?: ToastAction): void {
   }
   const el = toastEl;
   const hide = () => el.classList.remove('show');
+  clearTimeout(toastTimer);
+  if (pendingReveal) doc.removeEventListener('visibilitychange', pendingReveal);
+  pendingReveal = null;
+  hide();
   el.replaceChildren(h(doc, 'span', { text: msg }));
   el.classList.toggle('act', !!action);
   if (action) {
     el.append(h(doc, 'button', { class: 'tbtn', type: 'button', text: action.label, onclick: () => { hide(); action.run(); } }));
   }
-  requestAnimationFrame(() => el.classList.add('show'));
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(hide, action ? 7000 : 3200);
+  const reveal = () => {
+    void el.offsetWidth; // 스타일을 반영해 나타나는 전환 효과가 다시 일어나게
+    el.classList.add('show');
+    toastTimer = setTimeout(hide, action ? 7000 : 3200);
+  };
+  // 다른 탭에 있으면 보이지 않으니, 탭이 보일 때 띄우고 그때부터 시간을 잰다
+  if (doc.hidden) {
+    const onVisible = () => {
+      if (doc.hidden) return;
+      doc.removeEventListener('visibilitychange', onVisible);
+      pendingReveal = null;
+      reveal();
+    };
+    pendingReveal = onVisible;
+    doc.addEventListener('visibilitychange', onVisible);
+  } else {
+    reveal();
+  }
 }
 
 export interface LauncherDeps {

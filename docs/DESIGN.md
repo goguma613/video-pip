@@ -157,6 +157,8 @@ src/
 ├─ sites.ts         generic + youtube 어댑터
 ├─ dom.ts           h() 헬퍼 · 스타일 주입 · 아이콘 (innerHTML 금지)
 ├─ util.ts          clamp · 시간 표시 · debounce · 창 크기 계산
+├─ keepalive.ts     [2.0.6] 사이트 이동 중 PiP 영상 지키기(유튜브: 이어서 재생 · 다시 불러오기)
+├─ diag.ts          [2.0.3] 진단 기록(vpip:debug)
 └─ styles/          player.css · page.css
 scripts/meta.mjs    유저스크립트 메타블록
 scripts/build.mjs   빌드 / 개발 서버

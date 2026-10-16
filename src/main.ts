@@ -62,6 +62,9 @@ function boot(): void {
       }
       // PiP 창 안의 영상이 비워지거나 멈추면(사이트가 다른 영상으로 갈아탐) 재연결 검사
       for (const type of ['emptied', 'pause', 'ended']) win.document.addEventListener(type, scheduleRebind, true);
+      win.document.addEventListener('pause', keepAlive, true);
+      // PiP 창에서 직접 조작한 시각(이때 멈춘 건 사용자가 멈춘 것)
+      for (const type of ['pointerdown', 'keydown', 'wheel']) win.document.addEventListener(type, () => { pipInputAt = Date.now(); }, true);
       return ui;
     },
     legacyAvailable: (v) => document.pictureInPictureEnabled && !v.disablePictureInPicture,
@@ -81,7 +84,30 @@ function boot(): void {
     rebindTimer = setTimeout(() => session.rebind(), 50);
   }
   for (const type of ['loadedmetadata', 'play', 'playing', 'emptied']) document.addEventListener(type, scheduleRebind, true);
-  adapter.onNavigate?.(() => { scheduleRebind(); syncAutoPip(); });
+  adapter.onNavigate?.(() => {
+    scheduleRebind();
+    syncAutoPip();
+    keepAlive();
+    setTimeout(keepAlive, 600); // 이동이 끝난 뒤 조금 늦게 멈추는 경우
+  });
+
+  // 영상을 PiP로 보다가 홈·검색 등으로 가면 사이트(유튜브)가 영상을 멈춘다 → 이어서 재생한다.
+  // 이동 직전에 재생 중이었고, 사용자가 PiP 창에서 직접 멈춘 게 아니고, 영상 페이지가 아닌 곳으로 갔을 때만.
+  let nav = { at: 0, playing: false, resumes: 0 };
+  let pipInputAt = 0;
+  adapter.onNavigateStart?.(() => {
+    const v = session.video();
+    nav = { at: Date.now(), playing: session.mode() === 'doc' && !!v && !v.paused && !v.ended, resumes: 0 };
+  });
+  function keepAlive(): void {
+    const v = session.video();
+    if (!v || session.mode() !== 'doc' || !nav.playing || !v.paused || v.ended) return;
+    const now = Date.now();
+    if (now - nav.at > 5000 || now - pipInputAt < 1000 || nav.resumes >= 3) return; // 사이트와 싸우지 않게 횟수 제한
+    if (!adapter.offVideoPage?.()) return;
+    nav.resumes++;
+    v.play()?.catch(() => {});
+  }
 
   // 페이지 전체화면 → 영상을 돌려보내 전체화면에서 보이게
   document.addEventListener('fullscreenchange', () => session.fullscreen(document.fullscreenElement));

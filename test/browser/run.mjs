@@ -411,6 +411,35 @@ console.log('\nI. 유튜브 일반 ↔ 쇼츠');
   await page.close();
 }
 
+// ── J. 유튜브: PiP로 보다가 홈으로 이동 ──
+console.log('\nJ. 유튜브 홈 이동');
+for (const [name, late, userPaused] of [['홈으로 가도 PiP 영상이 계속 재생', 0, false], ['이동이 끝난 뒤 늦게 멈춰도 계속 재생', 300, false], ['사용자가 멈춘 영상은 그대로 멈춤', 0, true]]) {
+  const page = await context.newPage();
+  await page.goto('https://www.youtube.com/watch?v=nav');
+  await waitPlaying(page, 'video');
+  await page.mouse.click(1000, 700);
+  await page.keyboard.press('Alt+KeyP');
+  await page.waitForFunction(() => !!documentPictureInPicture.window?.document.querySelector('.stage video'), null, { timeout: 5000 });
+  if (userPaused) {
+    await pipEval(page, (w) => {
+      const b = w.document.querySelector('.cb.big');
+      b.dispatchEvent(new w.PointerEvent('pointerdown', { bubbles: true }));
+      b.click();
+    });
+  }
+  await page.evaluate((ms) => window.toHome(ms), late);
+  await page.waitForTimeout(late + 1000);
+  const r = await page.evaluate(() => ({
+    pip: !!documentPictureInPicture.window,
+    same: documentPictureInPicture.window?.document.querySelector('video') === window.watchVideo,
+    playing: !window.watchVideo.paused,
+    path: location.pathname,
+  }));
+  check(name, r.pip && r.same && r.path === '/' && r.playing === !userPaused, JSON.stringify(r));
+  await pipEval(page, (w) => w.close());
+  await page.close();
+}
+
 // ── G. 영상 없는 페이지 ──
 console.log('\nG. 영상 없는 페이지');
 {

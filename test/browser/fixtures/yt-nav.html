@@ -9,8 +9,11 @@ ytd-shorts{display:block} #shorts-player{position:relative;width:405px;height:72
 <script>
   // 유튜브처럼 플레이어가 자기 영상 요소를 기억한다(PiP로 옮겨져도 조작 가능)
   window.watchVideo = document.querySelector('#movie_player video');
+  // 유튜브 SPA 이동: yt-navigate-start → (영상 정지 등) → 주소 변경 → yt-navigate-finish
+  const start = () => window.dispatchEvent(new Event('yt-navigate-start'));
   const nav = (path, title) => { history.pushState({}, '', path); document.title = title; window.dispatchEvent(new Event('yt-navigate-finish')); };
   window.toShorts = () => {
+    start();
     watchVideo.pause();
     document.getElementById('watch').hidden = true;
     const shorts = document.getElementById('shorts');
@@ -25,10 +28,19 @@ ytd-shorts{display:block} #shorts-player{position:relative;width:405px;height:72
     shortsVideo.play();
   };
   window.toWatch = () => {
+    start();
     shortsVideo.pause();
     document.getElementById('shorts').hidden = true;
     document.getElementById('watch').hidden = false;
     nav('/watch?v=nav2', '두번째 영상 - YouTube');
     watchVideo.currentTime = 0; watchVideo.play();
+  };
+  // 시청 페이지 → 홈: 유튜브가 시청 중이던 영상을 멈춘다(lateMs면 이동이 끝난 뒤 늦게 멈춤)
+  window.toHome = (lateMs = 0) => {
+    start();
+    if (!lateMs) watchVideo.pause();
+    document.getElementById('watch').hidden = true;
+    nav('/', '홈 - YouTube');
+    if (lateMs) setTimeout(() => watchVideo.pause(), lateMs);
   };
 </script></body></html>

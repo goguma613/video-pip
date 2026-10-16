@@ -2,7 +2,7 @@
 // @name           🎬 고화질 영상 PIP (Picture-in-Picture)
 // @name:en        HD Video Picture-in-Picture
 // @namespace      https://github.com/goguma613/video-pip
-// @version        2.0.1
+// @version        2.0.2
 // @description    영상을 원본 화질 그대로 항상 위에 뜨는 작은 창으로. 영상 위 ⧉ 버튼 또는 Alt+P 한 번이면 끝.
 // @description:en Pop any video into an always-on-top window at original quality (Document Picture-in-Picture). Hover button or Alt+P.
 // @author         goguma613
@@ -784,7 +784,7 @@
         () => config.siteDisabled(),
         (off) => config.setSiteDisabled(off)
       ),
-      h(doc, "div", { class: "ver", text: `v${"2.0.1"} · Alt+P로 언제든 켜고 끌 수 있어요` })
+      h(doc, "div", { class: "ver", text: `v${"2.0.2"} · Alt+P로 언제든 켜고 끌 수 있어요` })
     );
     const sync = () => opts.forEach((o) => o.el.setAttribute("aria-checked", String(o.get())));
     sync();
@@ -1041,6 +1041,9 @@
     // "(3) 제목 - YouTube" → "제목"
     title: () => (document.title || "").replace(/^\(\d+\+?\)\s*/, "").replace(/\s*-\s*YouTube$/, "") || "YouTube",
     onNavigate: (cb) => window.addEventListener("yt-navigate-finish", cb),
+    onNavigateStart: (cb) => window.addEventListener("yt-navigate-start", cb),
+    // 홈·검색·채널 등. 다른 영상(/watch)·쇼츠·라이브로 가는 경우는 사이트에 맡긴다
+    offVideoPage: () => !/^\/(watch|shorts|live|embed)(\/|$)/.test(location.pathname),
     // 임베드 플레이어는 상단에 제목 바가 있어 그 아래로 내린다
     launcherInset: () => location.pathname.startsWith("/embed/") ? 56 : 8,
     // 유튜브 라이브는 영상 길이가 유한하게 나와서 플레이어 정보와 시간 표시의 라이브 표식으로 판정
@@ -1138,7 +1141,7 @@
   function boot() {
     const w = window;
     if (w.__videoPip) return;
-    w.__videoPip = "2.0.1";
+    w.__videoPip = "2.0.2";
     const top = isTopFrame();
     const adapter = pickAdapter(location);
     const local = safeLocalStorage();
@@ -1187,6 +1190,10 @@
           win.addEventListener("pagehide", () => mo.disconnect(), { once: true });
         }
         for (const type of ["emptied", "pause", "ended"]) win.document.addEventListener(type, scheduleRebind, true);
+        win.document.addEventListener("pause", keepAlive, true);
+        for (const type of ["pointerdown", "keydown", "wheel"]) win.document.addEventListener(type, () => {
+          pipInputAt = Date.now();
+        }, true);
         return ui;
       },
       legacyAvailable: (v) => document.pictureInPictureEnabled && !v.disablePictureInPicture,
@@ -1208,7 +1215,25 @@
     adapter.onNavigate?.(() => {
       scheduleRebind();
       syncAutoPip();
+      keepAlive();
+      setTimeout(keepAlive, 600);
     });
+    let nav = { at: 0, playing: false, resumes: 0 };
+    let pipInputAt = 0;
+    adapter.onNavigateStart?.(() => {
+      const v = session.video();
+      nav = { at: Date.now(), playing: session.mode() === "doc" && !!v && !v.paused && !v.ended, resumes: 0 };
+    });
+    function keepAlive() {
+      const v = session.video();
+      if (!v || session.mode() !== "doc" || !nav.playing || !v.paused || v.ended) return;
+      const now = Date.now();
+      if (now - nav.at > 5e3 || now - pipInputAt < 1e3 || nav.resumes >= 3) return;
+      if (!adapter.offVideoPage?.()) return;
+      nav.resumes++;
+      v.play()?.catch(() => {
+      });
+    }
     document.addEventListener("fullscreenchange", () => session.fullscreen(document.fullscreenElement));
     window.addEventListener("pagehide", () => config.flush());
     let autoRegistered = false;

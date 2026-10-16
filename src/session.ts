@@ -22,6 +22,10 @@ export interface MountedUI {
 
 export interface SessionDeps {
   pick(): HTMLVideoElement | null;
+  /** 페이지에서 지금 재생 중인 "주인공" 영상(따라갈 대상). 없으면 null */
+  follow(): HTMLVideoElement | null;
+  /** 영상을 갈아 끼운 뒤 창 비율을 맞춘다(브라우저가 거부할 수 있음) */
+  fitWindow?(win: Window, video: HTMLVideoElement): void;
   title(): string;
   /** Document PiP를 쓸 수 있나(지원 + 최상위 프레임) */
   docPip(): boolean;
@@ -191,8 +195,12 @@ export function createSession(deps: SessionDeps): Session {
       const cur = a.video;
       const homeGone = !a.token.anchor.isConnected;
       const sourceGone = cur.readyState === 0 && !cur.currentSrc && !cur.srcObject;
-      if (!homeGone && !sourceGone) return; // 같은 영상 요소를 재사용하는 사이트(유튜브)는 그대로
-      const next = deps.pick();
+      let next: HTMLVideoElement | null = null;
+      // ① 사이트가 원래 자리나 영상 소스를 없앴다(SPA) → 가장 알맞은 영상으로
+      if (homeGone || sourceGone) next = deps.pick();
+      // ② 사이트가 PiP 영상을 멈추고 다른 영상을 틀었다(유튜브 일반 ↔ 쇼츠는 플레이어가 따로) → 그 영상을 따라감
+      //    PiP 영상을 보는 중(재생 중)이면 절대 바꾸지 않는다. 같은 요소를 재사용하는 경우(유튜브 다음 영상)는 해당 없음
+      else if (cur.paused || cur.ended) next = deps.follow();
       if (!next || next === cur) return;
       dock.restore(a.token);
       a.token = dock.detach(next);
@@ -200,6 +208,7 @@ export function createSession(deps: SessionDeps): Session {
       a.video = next;
       a.ui.setVideo(next);
       a.ui.setTitle(deps.title());
+      if (a.win) deps.fitWindow?.(a.win, next);
     },
 
     fullscreen(el) {

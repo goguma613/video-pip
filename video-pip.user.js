@@ -2,7 +2,7 @@
 // @name           🎬 고화질 영상 PIP (Picture-in-Picture)
 // @name:en        HD Video Picture-in-Picture
 // @namespace      https://github.com/goguma613/video-pip
-// @version        2.0.0
+// @version        2.0.1
 // @description    영상을 원본 화질 그대로 항상 위에 뜨는 작은 창으로. 영상 위 ⧉ 버튼 또는 Alt+P 한 번이면 끝.
 // @description:en Pop any video into an always-on-top window at original quality (Document Picture-in-Picture). Hover button or Alt+P.
 // @author         goguma613
@@ -76,9 +76,12 @@
   var RATE_MAX = 4;
   var isLive = (v) => v.duration === Infinity;
   function seekRange(v) {
-    if (Number.isFinite(v.duration) && v.duration > 0) return { start: 0, end: v.duration };
     const s = v.seekable;
-    if (s && s.length) return { start: s.start(0), end: s.end(s.length - 1) };
+    if (s && s.length) {
+      const start = s.start(0), end = s.end(s.length - 1);
+      if (Number.isFinite(end) && end > start) return { start, end };
+    }
+    if (Number.isFinite(v.duration) && v.duration > 0) return { start: 0, end: v.duration };
     return null;
   }
   function togglePlay(v) {
@@ -499,7 +502,7 @@
   }
 
   // src/styles/player.css
-  var player_default = "/* PiP 창 안 플레이어. 이 스타일시트는 PiP 창 문서에만 있으므로, 영상이 돌아가면 효과도 저절로 사라진다. */\n:root {\n  color-scheme: dark;\n  --fg: #f1f4f8;\n  --dim: #b4bdc9;\n  --accent: #4f9dff;\n  --panel: rgba(20, 24, 32, 0.96);\n  font: 13px/1.3 system-ui, -apple-system, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;\n}\n* { box-sizing: border-box; margin: 0; padding: 0; }\nhtml, body { height: 100%; overflow: hidden; background: #000; color: var(--fg); }\nbutton { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex: none; }\nbutton:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }\nsvg { display: block; }\n[hidden] { display: none !important; }\n\n.stage { position: fixed; inset: 0; container: stage / inline-size; user-select: none; -webkit-user-select: none; }\n\n/* 영상: 사이트가 넣은 인라인 크기·위치를 덮어쓰기만 하고 지우지는 않는다(Zero-touch) */\n.slot { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #000; }\n.slot > video {\n  position: static !important; display: block !important;\n  width: 100% !important; height: 100% !important;\n  min-width: 0 !important; min-height: 0 !important; max-width: none !important; max-height: none !important;\n  margin: 0 !important; inset: auto !important; transform: none !important; filter: none !important;\n  object-fit: contain !important; opacity: 1 !important; visibility: visible !important;\n}\n/* controls 속성이 있는 영상의 브라우저 기본 컨트롤 숨김(Chromium). 별도 규칙이라 다른 브라우저에서 무시돼도 위 규칙은 유지 */\n.slot > video::-webkit-media-controls { display: none !important; }\n\n/* 오버레이: 항상 클릭을 받고(빈 곳 클릭 = 재생/일시정지), 숨김 상태에선 내용만 감춘다 */\n.ov { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: space-between; }\n.ov.idle { cursor: none; }\n.top, .mid, .bot { transition: opacity .14s ease, visibility 0s; }\n.ov.idle .top, .ov.idle .mid, .ov.idle .bot { opacity: 0; visibility: hidden; transition: opacity .32s ease, visibility 0s linear .32s; }\n\n.top { position: relative; z-index: 1; display: flex; align-items: center; gap: 2px; padding: 6px 6px 20px 12px; background: linear-gradient(rgba(0, 0, 0, .7), transparent); }\n.ttl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 600; text-shadow: 0 1px 2px rgba(0, 0, 0, .6); }\n\n.mid { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 28px; pointer-events: none; }\n.mid > button { pointer-events: auto; }\n\n.bot { position: relative; z-index: 1; padding: 22px 10px 4px; background: linear-gradient(transparent, rgba(0, 0, 0, .75)); }\n\n.ib { width: 32px; height: 32px; border-radius: 8px; }\n.ib:hover { background: rgba(255, 255, 255, .14); }\n.ib svg { width: 20px; height: 20px; }\n.cb { width: 44px; height: 44px; border-radius: 50%; background: rgba(0, 0, 0, .45); }\n.cb svg { width: 26px; height: 26px; }\n.cb.big { width: 60px; height: 60px; }\n.cb.big svg { width: 34px; height: 34px; }\n.cb:hover { background: rgba(79, 157, 255, .9); }\n\n/* 시크바 */\n.seek { position: relative; height: 18px; display: flex; align-items: center; cursor: pointer; touch-action: none; }\n.track { position: relative; width: 100%; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, .25); transition: height .1s; }\n.seek:hover .track, .seek.drag .track { height: 6px; }\n.buf, .played { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: inherit; }\n.buf { background: rgba(255, 255, 255, .35); }\n.played { background: var(--accent); }\n.thumb { position: absolute; top: 50%; left: 0; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: var(--accent); transform: scale(0); transition: transform .1s; }\n.seek:hover .thumb, .seek.drag .thumb { transform: scale(1); }\n.tip { position: absolute; bottom: 20px; left: 0; transform: translateX(-50%); padding: 2px 6px; border-radius: 6px; background: var(--panel); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; display: none; }\n.seek:hover .tip, .seek.drag .tip { display: block; }\n.seek.live .track { cursor: pointer; }\n\n.row { display: flex; align-items: center; gap: 2px; height: 34px; }\n.time { padding: 0 6px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--dim); white-space: nowrap; }\n.live { height: 20px; padding: 0 7px; margin: 0 6px; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: .3px; background: rgba(255, 255, 255, .16); }\n.live.edge { background: #e53935; }\n.grow { flex: 1; }\n.vol { width: 72px; height: 4px; accent-color: var(--accent); cursor: pointer; }\n.rate { min-width: 46px; height: 26px; padding: 0 9px; margin-left: 4px; border-radius: 13px; background: rgba(255, 255, 255, .12); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }\n.rate:hover { background: rgba(255, 255, 255, .2); }\n.rate.on { color: #ffb84f; }\n\n/* ⚙ 팝오버 */\n.pop { position: absolute; z-index: 2; top: 42px; right: 8px; width: 264px; max-width: calc(100% - 16px); max-height: calc(100% - 52px); overflow: auto; padding: 6px; border-radius: 12px; background: var(--panel); border: 1px solid rgba(255, 255, 255, .1); box-shadow: 0 8px 24px rgba(0, 0, 0, .5); }\n.pop[hidden] { display: none; }\n.opt { display: flex; width: 100%; align-items: center; gap: 10px; padding: 9px 8px; border-radius: 8px; text-align: left; font-size: 12.5px; }\n.opt:hover { background: rgba(255, 255, 255, .08); }\n.opt .lbl { flex: 1; }\n.opt .sub { display: block; margin-top: 2px; font-size: 11px; color: var(--dim); }\n.sw { position: relative; flex: none; width: 32px; height: 18px; border-radius: 9px; background: rgba(255, 255, 255, .25); transition: background .15s; }\n.sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform .15s; }\n.opt[aria-checked='true'] .sw { background: var(--accent); }\n.opt[aria-checked='true'] .sw::after { transform: translateX(14px); }\n.ver { padding: 6px 8px 3px; font-size: 11px; color: var(--dim); }\n\n/* 첫 진입 힌트 */\n.hint { position: absolute; z-index: 3; left: 50%; top: 48px; transform: translateX(-50%); max-width: calc(100% - 24px); padding: 8px 12px; border-radius: 10px; background: rgba(79, 157, 255, .95); color: #fff; font-size: 12px; text-align: center; pointer-events: none; transition: opacity .4s; }\n.hint.out { opacity: 0; }\n\n/* 좁은 창: 중앙은 재생 버튼만, 하단은 재생 · 시간 · 배속 */\n@container stage (max-width: 359px) {\n  .mid .side, .mute, .vol { display: none; }\n  .ttl { font-size: 12px; }\n}\n/* 낮은 창: 중앙 버튼 생략 */\n@media (max-height: 200px) {\n  .mid { display: none; }\n  .top { padding-bottom: 8px; }\n  .bot { padding-top: 8px; }\n}\n@media (prefers-reduced-motion: reduce) {\n  *, *::after { transition: none !important; }\n}\n";
+  var player_default = "/* PiP 창 안 플레이어. 이 스타일시트는 PiP 창 문서에만 있으므로, 영상이 돌아가면 효과도 저절로 사라진다. */\n:root {\n  color-scheme: dark;\n  --fg: #f1f4f8;\n  --dim: #b4bdc9;\n  --accent: #4f9dff;\n  --panel: rgba(20, 24, 32, 0.96);\n  font: 13px/1.3 system-ui, -apple-system, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;\n}\n* { box-sizing: border-box; margin: 0; padding: 0; }\nhtml, body { height: 100%; overflow: hidden; background: #000; color: var(--fg); }\nbutton { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex: none; }\nbutton:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }\nsvg { display: block; }\n[hidden] { display: none !important; }\n\n.stage { position: fixed; inset: 0; container: stage / inline-size; user-select: none; -webkit-user-select: none; }\n\n/* 영상: 사이트가 넣은 인라인 크기·위치를 덮어쓰기만 하고 지우지는 않는다(Zero-touch) */\n.slot { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #000; }\n.slot > video {\n  position: static !important; display: block !important;\n  width: 100% !important; height: 100% !important;\n  min-width: 0 !important; min-height: 0 !important; max-width: none !important; max-height: none !important;\n  margin: 0 !important; inset: auto !important; transform: none !important; filter: none !important;\n  object-fit: contain !important; opacity: 1 !important; visibility: visible !important;\n}\n/* controls 속성이 있는 영상의 브라우저 기본 컨트롤 숨김(Chromium). 별도 규칙이라 다른 브라우저에서 무시돼도 위 규칙은 유지 */\n.slot > video::-webkit-media-controls { display: none !important; }\n\n/* 오버레이: 항상 클릭을 받고(빈 곳 클릭 = 재생/일시정지), 숨김 상태에선 내용만 감춘다 */\n.ov { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: space-between; }\n.ov.idle { cursor: none; }\n.top, .mid, .bot { transition: opacity .14s ease, visibility 0s; }\n.ov.idle .top, .ov.idle .mid, .ov.idle .bot { opacity: 0; visibility: hidden; transition: opacity .32s ease, visibility 0s linear .32s; }\n\n.top { position: relative; z-index: 1; display: flex; align-items: center; gap: 2px; padding: 6px 6px 20px 12px; background: linear-gradient(rgba(0, 0, 0, .7), transparent); }\n.ttl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 600; text-shadow: 0 1px 2px rgba(0, 0, 0, .6); }\n\n.mid { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 28px; pointer-events: none; }\n.mid > button { pointer-events: auto; }\n\n.bot { position: relative; z-index: 1; padding: 22px 10px 4px; background: linear-gradient(transparent, rgba(0, 0, 0, .75)); }\n\n.ib { width: 32px; height: 32px; border-radius: 8px; }\n.ib:hover { background: rgba(255, 255, 255, .14); }\n.ib svg { width: 20px; height: 20px; }\n.cb { width: 44px; height: 44px; border-radius: 50%; background: rgba(0, 0, 0, .45); }\n.cb svg { width: 26px; height: 26px; }\n.cb.big { width: 60px; height: 60px; }\n.cb.big svg { width: 34px; height: 34px; }\n.cb:hover { background: rgba(79, 157, 255, .9); }\n\n/* 시크바 */\n.seek { position: relative; height: 18px; display: flex; align-items: center; cursor: pointer; touch-action: none; }\n.track { position: relative; width: 100%; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, .25); transition: height .1s; }\n.seek:hover .track, .seek.drag .track { height: 6px; }\n.buf, .played { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: inherit; }\n.buf { background: rgba(255, 255, 255, .35); }\n.played { background: var(--accent); }\n.thumb { position: absolute; top: 50%; left: 0; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: var(--accent); transform: scale(0); transition: transform .1s; }\n.seek:hover .thumb, .seek.drag .thumb { transform: scale(1); }\n.tip { position: absolute; bottom: 20px; left: 0; transform: translateX(-50%); padding: 2px 6px; border-radius: 6px; background: var(--panel); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; display: none; }\n.seek:hover .tip, .seek.drag .tip { display: block; }\n.seek.is-live .track { cursor: pointer; }\n\n.row { display: flex; align-items: center; gap: 2px; height: 34px; }\n.time { padding: 0 6px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--dim); white-space: nowrap; }\n.live { height: 20px; padding: 0 7px; margin: 0 6px; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: .3px; background: rgba(255, 255, 255, .16); }\n.live.edge { background: #e53935; }\n.grow { flex: 1; }\n.vol { width: 72px; height: 4px; accent-color: var(--accent); cursor: pointer; }\n.rate { min-width: 46px; height: 26px; padding: 0 9px; margin-left: 4px; border-radius: 13px; background: rgba(255, 255, 255, .12); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }\n.rate:hover { background: rgba(255, 255, 255, .2); }\n.rate.on { color: #ffb84f; }\n\n/* ⚙ 팝오버 */\n.pop { position: absolute; z-index: 2; top: 42px; right: 8px; width: 264px; max-width: calc(100% - 16px); max-height: calc(100% - 52px); overflow: auto; padding: 6px; border-radius: 12px; background: var(--panel); border: 1px solid rgba(255, 255, 255, .1); box-shadow: 0 8px 24px rgba(0, 0, 0, .5); }\n.pop[hidden] { display: none; }\n.opt { display: flex; width: 100%; align-items: center; gap: 10px; padding: 9px 8px; border-radius: 8px; text-align: left; font-size: 12.5px; }\n.opt:hover { background: rgba(255, 255, 255, .08); }\n.opt .lbl { flex: 1; }\n.opt .sub { display: block; margin-top: 2px; font-size: 11px; color: var(--dim); }\n.sw { position: relative; flex: none; width: 32px; height: 18px; border-radius: 9px; background: rgba(255, 255, 255, .25); transition: background .15s; }\n.sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform .15s; }\n.opt[aria-checked='true'] .sw { background: var(--accent); }\n.opt[aria-checked='true'] .sw::after { transform: translateX(14px); }\n.ver { padding: 6px 8px 3px; font-size: 11px; color: var(--dim); }\n\n/* 첫 진입 힌트 */\n.hint { position: absolute; z-index: 3; left: 50%; top: 48px; transform: translateX(-50%); max-width: calc(100% - 24px); padding: 8px 12px; border-radius: 10px; background: rgba(79, 157, 255, .95); color: #fff; font-size: 12px; text-align: center; pointer-events: none; transition: opacity .4s; }\n.hint.out { opacity: 0; }\n\n/* 좁은 창: 중앙은 재생 버튼만, 하단은 재생 · 시간 · 배속 */\n@container stage (max-width: 359px) {\n  .mid .side, .mute, .vol { display: none; }\n  .ttl { font-size: 12px; }\n}\n/* 낮은 창: 중앙 버튼 생략 */\n@media (max-height: 200px) {\n  .mid { display: none; }\n  .top { padding-bottom: 8px; }\n  .bot { padding-top: 8px; }\n}\n@media (prefers-reduced-motion: reduce) {\n  *, *::after { transition: none !important; }\n}\n";
 
   // src/player-ui.ts
   var HIDE_MS = 2400;
@@ -528,11 +531,11 @@
     const seek = h(doc, "div", { class: "seek", role: "slider", "aria-label": "재생 위치", tabindex: "-1" }, track, tip);
     const playB = btn("ib", "play", "pause");
     const time = h(doc, "span", { class: "time" });
-    const live = h(doc, "button", { class: "live", type: "button", title: "실시간으로", text: "LIVE", onclick: () => toLiveEdge(video) });
+    const liveB = h(doc, "button", { class: "live", type: "button", title: "실시간으로", text: "LIVE", onclick: () => deps.toLiveEdge(video) });
     const muteB = btn("ib mute", "mute", "volume");
     const vol = h(doc, "input", { class: "vol", type: "range", min: "0", max: "100", step: "1", "aria-label": "볼륨" });
     const rate = h(doc, "button", { class: "rate", type: "button", title: "배속 (클릭: 바꾸기 · [ / ] / =)", "aria-label": "배속", onclick: () => deps.run("rateCycle") });
-    const row = h(doc, "div", { class: "row" }, playB, time, live, h(doc, "span", { class: "grow" }), muteB, vol, rate);
+    const row = h(doc, "div", { class: "row" }, playB, time, liveB, h(doc, "span", { class: "grow" }), muteB, vol, rate);
     const bot = h(doc, "div", { class: "bot" }, seek, row);
     const ov = h(doc, "div", { class: "ov" }, top, mid, bot);
     const pop = buildPopover(doc, deps.config);
@@ -540,15 +543,19 @@
     doc.body.append(stage);
     let visible = true;
     let dragging = false;
+    let live = false;
+    const refreshLive = () => {
+      live = deps.isLive(video);
+    };
     const setIcon = (b, name) => b.replaceChildren(icon(doc, name));
     function renderProgress() {
-      const isLive2 = isLive(video);
+      const isLive2 = live;
       const r = seekRange(video);
       time.hidden = isLive2;
-      live.hidden = !isLive2;
-      seek.classList.toggle("live", isLive2);
+      liveB.hidden = !isLive2;
+      seek.classList.toggle("is-live", isLive2);
       if (isLive2) {
-        live.classList.toggle("edge", !r || r.end - video.currentTime < 15);
+        liveB.classList.toggle("edge", !r || r.end - video.currentTime < 15);
       } else {
         time.textContent = `${fmtTime(video.currentTime)} / ${fmtTime(video.duration)}`;
       }
@@ -596,16 +603,22 @@
         ["timeupdate", () => visible && !dragging && renderProgress()],
         // 숨김 상태에선 DOM 쓰기 0
         ["progress", () => visible && renderProgress()],
-        ["durationchange", renderProgress],
-        ["loadedmetadata", renderProgress],
-        ["emptied", renderProgress],
+        ["durationchange", onMeta],
+        ["loadedmetadata", onMeta],
+        ["emptied", onMeta],
+        ["playing", onMeta],
         ["volumechange", renderVolume],
         ["ratechange", renderRate]
       ];
       on.forEach(([t, fn]) => v.addEventListener(t, fn));
       unbind = () => on.forEach(([t, fn]) => v.removeEventListener(t, fn));
       video = v;
+      refreshLive();
       renderAll();
+    }
+    function onMeta() {
+      refreshLive();
+      renderProgress();
     }
     let hideTimer = 0;
     function show() {
@@ -665,7 +678,7 @@
         return;
       }
       const t = r.start + ratio * (r.end - r.start);
-      tip.textContent = isLive(video) ? `-${fmtTime(r.end - t)}` : fmtTime(t);
+      tip.textContent = live ? `-${fmtTime(r.end - t)}` : fmtTime(t);
     };
     seek.addEventListener("pointerdown", (e) => {
       dragging = true;
@@ -771,7 +784,7 @@
         () => config.siteDisabled(),
         (off) => config.setSiteDisabled(off)
       ),
-      h(doc, "div", { class: "ver", text: `v${"2.0.0"} · Alt+P로 언제든 켜고 끌 수 있어요` })
+      h(doc, "div", { class: "ver", text: `v${"2.0.1"} · Alt+P로 언제든 켜고 끌 수 있어요` })
     );
     const sync = () => opts.forEach((o) => o.el.setAttribute("aria-checked", String(o.get())));
     sync();
@@ -987,8 +1000,9 @@
         const cur = a.video;
         const homeGone = !a.token.anchor.isConnected;
         const sourceGone = cur.readyState === 0 && !cur.currentSrc && !cur.srcObject;
-        if (!homeGone && !sourceGone) return;
-        const next = deps.pick();
+        let next = null;
+        if (homeGone || sourceGone) next = deps.pick();
+        else if (cur.paused || cur.ended) next = deps.follow();
         if (!next || next === cur) return;
         restore(a.token);
         a.token = detach(next);
@@ -996,6 +1010,7 @@
         a.video = next;
         a.ui.setVideo(next);
         a.ui.setTitle(deps.title());
+        if (a.win) deps.fitWindow?.(a.win, next);
       },
       fullscreen(el) {
         const home = active?.kind === "doc" ? active.token?.anchor.parentNode : null;
@@ -1017,14 +1032,37 @@
     id: "generic",
     title: () => document.title || location.hostname
   };
+  var ytPlayer = () => document.getElementById("movie_player");
+  var isShorts = () => location.pathname.startsWith("/shorts");
   var youtube = {
     id: "youtube",
-    primaryVideo: () => location.pathname.startsWith("/shorts") ? null : document.querySelector("#movie_player video.html5-main-video"),
+    // 일반 영상과 쇼츠는 플레이어가 따로 있다
+    primaryVideo: () => document.querySelector(isShorts() ? "ytd-reel-video-renderer[is-active] video, #shorts-player video" : "#movie_player video.html5-main-video"),
     // "(3) 제목 - YouTube" → "제목"
     title: () => (document.title || "").replace(/^\(\d+\+?\)\s*/, "").replace(/\s*-\s*YouTube$/, "") || "YouTube",
     onNavigate: (cb) => window.addEventListener("yt-navigate-finish", cb),
     // 임베드 플레이어는 상단에 제목 바가 있어 그 아래로 내린다
-    launcherInset: () => location.pathname.startsWith("/embed/") ? 56 : 8
+    launcherInset: () => location.pathname.startsWith("/embed/") ? 56 : 8,
+    // 유튜브 라이브는 영상 길이가 유한하게 나와서 플레이어 정보와 시간 표시의 라이브 표식으로 판정
+    isLive(v) {
+      if (v.duration === Infinity) return true;
+      if (isShorts()) return false;
+      try {
+        if (ytPlayer()?.getVideoData?.()?.isLive === true) return true;
+      } catch {
+      }
+      return !!document.querySelector("#movie_player .ytp-time-display.ytp-live");
+    },
+    toLiveEdge() {
+      const p = ytPlayer();
+      if (typeof p?.seekToLiveHead !== "function") return false;
+      try {
+        p.seekToLiveHead();
+        return true;
+      } catch {
+        return false;
+      }
+    }
   };
   function pickAdapter(loc) {
     return /(^|\.)youtube(-nocookie)?\.com$/.test(loc.hostname) ? youtube : generic;
@@ -1085,6 +1123,13 @@
       setManual(v) {
         manual = v;
       },
+      prominent(v) {
+        const primary = adapter.primaryVideo?.() ?? null;
+        const i = info(v, primary);
+        const vw = doc.documentElement.clientWidth || innerWidth;
+        const vh = doc.documentElement.clientHeight || innerHeight;
+        return i.playing && !i.tiny && i.area * i.visible / (vw * vh) >= 0.2 && (i.audible || i.primary);
+      },
       videos: () => all
     };
   }
@@ -1093,7 +1138,7 @@
   function boot() {
     const w = window;
     if (w.__videoPip) return;
-    w.__videoPip = "2.0.0";
+    w.__videoPip = "2.0.1";
     const top = isTopFrame();
     const adapter = pickAdapter(location);
     const local = safeLocalStorage();
@@ -1101,6 +1146,22 @@
     const tracker = createTracker(document, adapter);
     const session = createSession({
       pick: () => tracker.pick(),
+      follow: () => {
+        const v = tracker.pick();
+        return v && tracker.prominent(v) ? v : null;
+      },
+      fitWindow(win, v) {
+        const fit = () => {
+          const { width, height } = pipWindowSize(v, Math.max(win.innerWidth, win.innerHeight));
+          if (Math.abs(width / height - win.innerWidth / win.innerHeight) < 0.05) return;
+          try {
+            win.resizeTo(width + win.outerWidth - win.innerWidth, height + win.outerHeight - win.innerHeight);
+          } catch {
+          }
+        };
+        if (v.videoWidth) fit();
+        else v.addEventListener("loadedmetadata", fit, { once: true });
+      },
       title: () => adapter.title(),
       docPip: () => top && !!window.documentPictureInPicture,
       requestWindow: (v) => window.documentPictureInPicture.requestWindow(pipWindowSize(v, config.get().pipLongEdge)),
@@ -1110,7 +1171,11 @@
           run: (id) => keymap.run(id),
           hint: (id) => keymap.hint(id),
           onKey: (e) => keymap.handle(e, "player"),
-          config
+          config,
+          isLive: (x) => adapter.isLive?.(x) ?? isLive(x),
+          toLiveEdge: (x) => {
+            if (!adapter.toLiveEdge?.(x)) toLiveEdge(x);
+          }
         });
         win.addEventListener("resize", debounce(() => {
           config.set({ pipLongEdge: Math.max(win.innerWidth, win.innerHeight) });
@@ -1121,7 +1186,7 @@
           mo.observe(titleEl, { childList: true, characterData: true, subtree: true });
           win.addEventListener("pagehide", () => mo.disconnect(), { once: true });
         }
-        win.document.addEventListener("emptied", scheduleRebind, true);
+        for (const type of ["emptied", "pause", "ended"]) win.document.addEventListener(type, scheduleRebind, true);
         return ui;
       },
       legacyAvailable: (v) => document.pictureInPictureEnabled && !v.disablePictureInPicture,
@@ -1139,7 +1204,7 @@
       clearTimeout(rebindTimer);
       rebindTimer = setTimeout(() => session.rebind(), 50);
     }
-    for (const type of ["loadedmetadata", "play", "emptied"]) document.addEventListener(type, scheduleRebind, true);
+    for (const type of ["loadedmetadata", "play", "playing", "emptied"]) document.addEventListener(type, scheduleRebind, true);
     adapter.onNavigate?.(() => {
       scheduleRebind();
       syncAutoPip();

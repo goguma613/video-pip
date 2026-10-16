@@ -4,13 +4,17 @@ import { clamp } from './util';
 export const RATE_CYCLE = [0.5, 1, 1.25, 1.5, 2];
 const RATE_MIN = 0.25, RATE_MAX = 4;
 
+/** 일반 판정. 유튜브 라이브처럼 길이가 유한하게 나오는 라이브는 사이트 어댑터가 판정한다. */
 export const isLive = (v: HTMLVideoElement): boolean => v.duration === Infinity;
 
-/** 탐색 가능한 구간. 일반 영상은 [0, 길이], 라이브는 seekable 범위 */
+/** 탐색 가능한 구간. 브라우저가 알려 주는 seekable 범위를 우선(라이브 DVR 포함), 없으면 [0, 길이] */
 export function seekRange(v: HTMLVideoElement): { start: number; end: number } | null {
-  if (Number.isFinite(v.duration) && v.duration > 0) return { start: 0, end: v.duration };
   const s = v.seekable;
-  if (s && s.length) return { start: s.start(0), end: s.end(s.length - 1) };
+  if (s && s.length) {
+    const start = s.start(0), end = s.end(s.length - 1);
+    if (Number.isFinite(end) && end > start) return { start, end };
+  }
+  if (Number.isFinite(v.duration) && v.duration > 0) return { start: 0, end: v.duration };
   return null;
 }
 

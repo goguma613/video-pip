@@ -14,6 +14,9 @@ export interface PlayerDeps {
   /** 단축키 처리(키맵) */
   onKey(e: KeyboardEvent): void;
   config: ConfigStore;
+  /** 라이브인가(사이트 어댑터 판정 포함) */
+  isLive(v: HTMLVideoElement): boolean;
+  toLiveEdge(v: HTMLVideoElement): void;
 }
 
 const HIDE_MS = 2400;
@@ -49,11 +52,11 @@ export function mountPlayerUI(win: Window, first: HTMLVideoElement, deps: Player
 
   const playB = btn('ib', 'play', 'pause');
   const time = h(doc, 'span', { class: 'time' });
-  const live = h(doc, 'button', { class: 'live', type: 'button', title: '실시간으로', text: 'LIVE', onclick: () => media.toLiveEdge(video) });
+  const liveB = h(doc, 'button', { class: 'live', type: 'button', title: '실시간으로', text: 'LIVE', onclick: () => deps.toLiveEdge(video) });
   const muteB = btn('ib mute', 'mute', 'volume');
   const vol = h(doc, 'input', { class: 'vol', type: 'range', min: '0', max: '100', step: '1', 'aria-label': '볼륨' });
   const rate = h(doc, 'button', { class: 'rate', type: 'button', title: '배속 (클릭: 바꾸기 · [ / ] / =)', 'aria-label': '배속', onclick: () => deps.run('rateCycle') });
-  const row = h(doc, 'div', { class: 'row' }, playB, time, live, h(doc, 'span', { class: 'grow' }), muteB, vol, rate);
+  const row = h(doc, 'div', { class: 'row' }, playB, time, liveB, h(doc, 'span', { class: 'grow' }), muteB, vol, rate);
   const bot = h(doc, 'div', { class: 'bot' }, seek, row);
 
   const ov = h(doc, 'div', { class: 'ov' }, top, mid, bot);
@@ -64,17 +67,19 @@ export function mountPlayerUI(win: Window, first: HTMLVideoElement, deps: Player
   // ── 표시 갱신 ──
   let visible = true;
   let dragging = false;
+  let live = false; // 영상이 바뀔 때만 다시 판정(매 timeupdate마다 사이트 API를 부르지 않게)
+  const refreshLive = () => { live = deps.isLive(video); };
 
   const setIcon = (b: HTMLButtonElement, name: Parameters<typeof icon>[1]) => b.replaceChildren(icon(doc, name));
 
   function renderProgress(): void {
-    const isLive = media.isLive(video);
+    const isLive = live;
     const r = media.seekRange(video);
     time.hidden = isLive;
-    live.hidden = !isLive;
-    seek.classList.toggle('live', isLive);
+    liveB.hidden = !isLive;
+    seek.classList.toggle('is-live', isLive);
     if (isLive) {
-      live.classList.toggle('edge', !r || r.end - video.currentTime < 15);
+      liveB.classList.toggle('edge', !r || r.end - video.currentTime < 15);
     } else {
       time.textContent = `${fmtTime(video.currentTime)} / ${fmtTime(video.duration)}`;
     }
@@ -115,13 +120,18 @@ export function mountPlayerUI(win: Window, first: HTMLVideoElement, deps: Player
       ['play', renderPlay], ['pause', renderPlay], ['ended', renderPlay],
       ['timeupdate', () => visible && !dragging && renderProgress()], // 숨김 상태에선 DOM 쓰기 0
       ['progress', () => visible && renderProgress()],
-      ['durationchange', renderProgress], ['loadedmetadata', renderProgress], ['emptied', renderProgress],
+      ['durationchange', onMeta], ['loadedmetadata', onMeta], ['emptied', onMeta], ['playing', onMeta],
       ['volumechange', renderVolume], ['ratechange', renderRate],
     ];
     on.forEach(([t, fn]) => v.addEventListener(t, fn));
     unbind = () => on.forEach(([t, fn]) => v.removeEventListener(t, fn));
     video = v;
+    refreshLive();
     renderAll();
+  }
+  function onMeta(): void {
+    refreshLive();
+    renderProgress();
   }
 
   // ── 보이기 / 숨기기 ──
@@ -183,7 +193,7 @@ export function mountPlayerUI(win: Window, first: HTMLVideoElement, deps: Player
     tip.style.left = `${ratio * 100}%`;
     if (!r) { tip.textContent = ''; return; }
     const t = r.start + ratio * (r.end - r.start);
-    tip.textContent = media.isLive(video) ? `-${fmtTime(r.end - t)}` : fmtTime(t);
+    tip.textContent = live ? `-${fmtTime(r.end - t)}` : fmtTime(t);
   };
   seek.addEventListener('pointerdown', (e) => {
     dragging = true;

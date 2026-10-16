@@ -24,7 +24,9 @@ await context.addInitScript({ content: SCRIPT });
 await context.route('**/*', async (route) => {
   const u = new URL(route.request().url());
   let file = u.pathname === '/' ? 'inflow.html' : u.pathname.slice(1);
-  if (u.hostname === 'www.youtube.com' && u.pathname === '/watch') file = 'yt.html';
+  if (u.hostname === 'www.youtube.com' && u.pathname === '/watch') {
+    file = { 'live-api': 'yt-live-api.html', 'live-class': 'yt-live-class.html', nav: 'yt-nav.html' }[u.searchParams.get('v')] ?? 'yt.html';
+  }
   const p = path.join(DIR, file);
   if (!fs.existsSync(p)) return route.fulfill({ status: 404, body: 'nf' });
   if (!file.endsWith('.webm')) return route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: fs.readFileSync(p) });
@@ -338,6 +340,73 @@ console.log('\nF. controls 속성 영상');
     await pip.waitForTimeout(300);
     await pip.screenshot({ path: path.join(SHOTS, 'pip-controls-paused.png') });
   }
+  await pipEval(page, (w) => w.close());
+  await page.close();
+}
+
+// ── H. 유튜브 라이브(영상 길이가 유한하게 나오는 경우) ──
+console.log('\nH. 유튜브 라이브');
+for (const [v, how] of [['live-api', '플레이어 API'], ['live-class', '시간 표시의 라이브 표식']]) {
+  const page = await context.newPage();
+  await page.goto(`https://www.youtube.com/watch?v=${v}`);
+  await waitPlaying(page, 'video');
+  await page.mouse.click(1000, 700);
+  await page.keyboard.press('Alt+KeyP');
+  await page.waitForFunction(() => !!documentPictureInPicture.window?.document.querySelector('.stage video'), null, { timeout: 5000 });
+  const r = await pipEval(page, (w) => {
+    const d = w.document;
+    return { live: !d.querySelector('button.live').hidden, time: !d.querySelector('.time').hidden };
+  });
+  check(`${how}로 라이브 감지 → LIVE 표시, 시간 숨김`, r.live && !r.time, JSON.stringify(r));
+  if (v === 'live-api') {
+    await pipEval(page, (w) => w.document.querySelector('button.live').click());
+    check('LIVE 클릭 → 유튜브 방식(seekToLiveHead)으로 실시간 이동', await page.evaluate(() => window.__liveHead === true));
+  }
+  await pipEval(page, (w) => w.close());
+  await page.close();
+}
+
+// ── I. 유튜브 일반 영상 ↔ 쇼츠 이동(플레이어가 따로 있음) ──
+console.log('\nI. 유튜브 일반 ↔ 쇼츠');
+{
+  const page = await context.newPage();
+  await page.goto('https://www.youtube.com/watch?v=nav');
+  await waitPlaying(page, 'video');
+  await page.mouse.click(1000, 700);
+  await page.keyboard.press('Alt+KeyP');
+  await page.waitForFunction(() => !!documentPictureInPicture.window?.document.querySelector('.stage video'), null, { timeout: 5000 });
+  await page.evaluate(() => window.toShorts());
+  await page.waitForFunction(() => documentPictureInPicture.window?.document.querySelector('video') === window.shortsVideo, null, { timeout: 5000 }).catch(() => {});
+  const a = await page.evaluate(() => {
+    const w = documentPictureInPicture.window;
+    return {
+      shortsInPip: w?.document.querySelector('video') === window.shortsVideo,
+      watchHome: window.watchVideo.parentElement?.classList.contains('html5-video-container'),
+      ttl: w?.document.querySelector('.ttl')?.textContent,
+      count: w?.document.querySelectorAll('video').length,
+    };
+  });
+  check('일반 → 쇼츠: PiP가 쇼츠 영상으로 바뀜', a.shortsInPip && a.count === 1, JSON.stringify(a));
+  check('일반 → 쇼츠: 이전 영상은 제자리로', a.watchHome === true);
+  check('일반 → 쇼츠: 제목 갱신', a.ttl === '쇼츠 영상', a.ttl);
+  await page.evaluate(() => window.toWatch());
+  await page.waitForFunction(() => documentPictureInPicture.window?.document.querySelector('video') === window.watchVideo, null, { timeout: 5000 }).catch(() => {});
+  const b = await page.evaluate(() => {
+    const w = documentPictureInPicture.window;
+    return {
+      watchInPip: w?.document.querySelector('video') === window.watchVideo,
+      shortsHome: window.shortsVideo.parentElement?.id === 'shorts-player',
+      ttl: w?.document.querySelector('.ttl')?.textContent,
+      playing: !window.watchVideo.paused,
+    };
+  });
+  check('쇼츠 → 일반: PiP가 일반 영상으로 바뀌고 재생 중', b.watchInPip && b.playing, JSON.stringify(b));
+  check('쇼츠 → 일반: 쇼츠 영상은 제자리로', b.shortsHome === true);
+  check('쇼츠 → 일반: 제목 갱신', b.ttl === '두번째 영상', b.ttl);
+  // PiP 영상을 보는 중(재생 중)이면 페이지의 다른 영상이 재생돼도 따라가지 않음
+  await page.evaluate(() => { window.shortsVideo.muted = false; window.shortsVideo.play(); });
+  await page.waitForTimeout(400);
+  check('PiP 영상 재생 중에는 바꾸지 않음', await page.evaluate(() => documentPictureInPicture.window?.document.querySelector('video') === window.watchVideo));
   await pipEval(page, (w) => w.close());
   await page.close();
 }

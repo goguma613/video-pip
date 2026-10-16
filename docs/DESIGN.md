@@ -183,6 +183,7 @@ scripts/build.mjs   빌드 / 개발 서버
 | idle | 탭 전환 (자동 PIP 켜짐) | doc | MediaSession `enterpictureinpicture` 핸들러에서 위와 같이 |
 | doc | 창 닫힘(`pagehide`) | idle | `dock.restore` |
 | doc | 유튜브 다음 영상 · 플레이어 재생성으로 video 교체 | doc | 이전 영상 복원 → 새 영상 이동 |
+| doc | **[구현 2.0.1]** PiP 영상이 멈췄고, 페이지에서 다른 "주인공" 영상(재생 중 · 화면 20% 이상 · 소리 남 또는 사이트 주 영상)이 재생됨 — 유튜브 일반 ↔ 쇼츠는 플레이어가 따로라 이 경우 | doc | 이전 영상 복원 → 새 영상 이동 → 창 비율 맞춤(가능하면) |
 | doc | 페이지 전체화면 진입(영상 원래 자리를 포함) | idle | 창을 닫고 영상을 돌려보내 전체화면에서 보이게 |
 | legacy | `leavepictureinpicture` | idle | — |
 | opening | 새 요청 | (대기) | 직렬화. 같은 요청이 대기 중이면 하나로 합침 |
@@ -247,6 +248,8 @@ interface SiteAdapter {
 v2.0은 `generic`과 `youtube` 두 개만 둔다.
 
 **[구현]** 복원 후 `resize` 이벤트는 어느 사이트든 Session이 보내므로 `afterRestore`는 빼고, 위치 보정은 상단 여백 하나(`launcherInset`)로 줄였다.
+
+**[구현 2.0.1]** 유튜브 라이브는 `duration`이 `Infinity`가 아니라 유한하게 나온다(사용자 제보). 그래서 `isLive(v)`(플레이어 `getVideoData().isLive` 또는 `.ytp-time-display.ytp-live`)와 `toLiveEdge()`(`seekToLiveHead()`)를 어댑터에 추가했다. 둘 다 유튜브 내부 API라 없으면 일반 방식으로 돌아간다. 쇼츠의 주 영상은 `ytd-reel-video-renderer[is-active] video, #shorts-player video`로 찾는다.
 
 ### 5.7 프레임
 

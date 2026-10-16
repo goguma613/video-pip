@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: 커밋된 video-pip.user.js가 소스 빌드 결과와 같은지
+        run: git diff --exit-code video-pip.user.js
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser

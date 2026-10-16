@@ -1,1707 +1,1180 @@
 // ==UserScript==
-// @name         🎬 고화질 영상 PIP (Picture-in-Picture)
-// @name:en      HD Video Picture-in-Picture
-// @namespace    https://github.com/goguma613/video-pip
-// @version      1.2.8
-// @description  영상을 항상 위에 뜨는 작은 창으로. Document PiP로 원본 화질 그대로 유지 + 커스텀 컨트롤(속도/볼륨/필터/줌·회전/스크린샷), 스크롤 시 자동 미니플레이어, 탭전환 자동 PIP(MediaSession), 미니 설정 팝오버, 상황별 프리셋, 단축키, 사이트별 설정 기억.
-// @description:en  Pop any video into an always-on-top window at original quality with custom controls, presets, auto-PiP, hotkeys and per-site memory (Document Picture-in-Picture).
-// @author       goguma613
-// @match        *://*.youtube.com/*
-// @match        *://*.youtube-nocookie.com/*
-// @match        *://*.twitch.tv/*
-// @match        *://*.vimeo.com/*
-// @match        *://*.tv.naver.com/*
-// @match        *://*.tv.kakao.com/*
-// @match        *://*.afreecatv.com/*
-// @match        *://*.chzzk.naver.com/*
-// @exclude      *://*.netflix.com/*
-// @exclude      *://*.disneyplus.com/*
-// @grant        none
-// @run-at       document-start
-// @updateURL    https://raw.githubusercontent.com/goguma613/video-pip/main/video-pip.user.js
-// @downloadURL  https://raw.githubusercontent.com/goguma613/video-pip/main/video-pip.user.js
-// @homepageURL  https://github.com/goguma613/video-pip
-// @icon         data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%234f9dff'%3E%3Cpath d='M19 11h-8v6h8v-6zm4 8V4.98C23 3.88 22.1 3 21 3H3c-1.1 0-2 .88-2 1.98V19c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2 .02H3V4.97h18v14.05z'/%3E%3C/svg%3E
+// @name           🎬 고화질 영상 PIP (Picture-in-Picture)
+// @name:en        HD Video Picture-in-Picture
+// @namespace      https://github.com/goguma613/video-pip
+// @version        2.0.0
+// @description    영상을 원본 화질 그대로 항상 위에 뜨는 작은 창으로. 영상 위 ⧉ 버튼 또는 Alt+P 한 번이면 끝.
+// @description:en Pop any video into an always-on-top window at original quality (Document Picture-in-Picture). Hover button or Alt+P.
+// @author         goguma613
+// @match          *://*/*
+// @exclude        *://*.netflix.com/*
+// @exclude        *://*.disneyplus.com/*
+// @grant          none
+// @run-at         document-start
+// @updateURL      https://raw.githubusercontent.com/goguma613/video-pip/main/video-pip.user.js
+// @downloadURL    https://raw.githubusercontent.com/goguma613/video-pip/main/video-pip.user.js
+// @homepageURL    https://github.com/goguma613/video-pip
+// @supportURL     https://github.com/goguma613/video-pip/issues
+// @icon           data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%234f9dff'%3E%3Cpath d='M19 11h-8v6h8v-6zm4 8V4.98C23 3.88 22.1 3 21 3H3c-1.1 0-2 .88-2 1.98V19c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2 .02H3V4.97h18v14.05z'/%3E%3C/svg%3E
 // ==/UserScript==
 
-/*
- * 고화질 영상 PIP
- * ─────────────────────────────────────────────────────────────
- * 단일 파일 안에서 역할별 모듈로 분리:
- *   ConfigManager   - 사이트(hostname)별 설정 저장/로드 (localStorage, debounce)
- *   VideoObserver   - MutationObserver + yt-navigate-finish로 video 등장/교체 감지, 대상 선택
- *   FilterEngine    - 밝기/대비/채도 + 줌/회전/미러를 video에 적용
- *   PipController   - ★핵심: Document PiP / 레거시 분기, video 이동·복원, PiP 창 컨트롤
- *   MiniPlayer      - 스크롤 이탈 시 원본 페이지 안에서 video를 떠다니는 미니창으로(제스처 불필요)
- *   HotkeyManager   - 단축키(설정 기반), YT 단축키 충돌 회피
- *   AutoPipManager  - 스크롤 이탈→미니플레이어(자동) / 탭 전환→MediaSession 자동 PIP
- *   UIManager       - 원본 페이지 Shadow DOM 플로팅 패널(진입·설정), 드래그/핀/페이드/온보딩
- *
- * 핵심 결정:
- *   주 엔진 = Document Picture-in-Picture (Chrome/Edge 116+) — 원본 <video>를 통째로
- *   새 창으로 옮겨 원본 해상도(4K 포함)를 손실 없이 유지하고 커스텀 UI를 입힘.
- *   폴백 = 레거시 video.requestPictureInPicture() (Firefox/Safari/모바일, 커스텀 컨트롤 없음).
- */
+// 이 파일은 빌드 결과물입니다. 소스: https://github.com/goguma613/video-pip/tree/main/src
 
-(function () {
-  'use strict';
-
-  // 최상위 프레임에서만 UI 렌더(임베드 iframe 중복 방지).
-  const IS_TOP = (function () {
-    try { if (window.frameElement) return false; } catch (e) { return false; }
-    return true;
-  })();
-  if (!IS_TOP) return;
-
-  // ─────────────────────────────────────────────────────────────
-  // 상수
-  // ─────────────────────────────────────────────────────────────
-  const MIN_RATE = 0.25, MAX_RATE = 4;
-  const SAVE_DEBOUNCE = 300;
-  const CONTROLS_HIDE_MS = 2400;   // PiP 컨트롤 자동 숨김
-  const SUPPORTS_DOC_PIP = 'documentPictureInPicture' in window;
-
-  const DEFAULTS = {
-    version: 1,
-    // 재생
-    defaultRate: 1,
-    seekStep: 5,
-    preservePitch: true,
-    // 표시
-    filters: { brightness: 100, contrast: 100, saturate: 100 }, // %
-    zoom: 1, rotate: 0, mirror: false, fit: 'contain',          // contain | cover
-    dim: 100,                                                   // 화면 디밍/투명도 (50~100%)
-    subtitles: { enabled: true, size: 100, position: 'bottom', bg: 50 }, // 자막 따라오기
-    // 창
-    pipSize: { w: 480, h: 270 },
-    activePreset: 'basic',
-    // 자동 PIP
-    autoPip: false,        // 마스터(탭전환 자동PIP + 스크롤 이탈 미니플레이어)
-    miniCorner: 'br',      // 미니플레이어 스냅 위치: tl | tr | bl | br
-    // 단축키 (정규화된 콤보)
-    hotkeys: {
-      togglePip: 'Alt+p', speedDown: '[', speedUp: ']',
-      screenshot: 'Alt+s',
-    },
-    // UI
-    collapsed: false,
-    fadeWhenIdle: true,
-    onboarded: false,
-  };
-
-  // 상황별 원클릭 프리셋 (크기 + 옵션 묶음). 클릭 시 적용 + PIP 켜기.
-  const PRESETS = {
-    basic: { label: '🎬 기본',  size: { w: 480, h: 270 }, rate: 1,    filters: { brightness: 100, contrast: 100, saturate: 100 }, zoom: 1, rotate: 0, fit: 'contain' },
-    call:  { label: '📞 통화옆', size: { w: 320, h: 180 }, rate: 1,    filters: { brightness: 100, contrast: 100, saturate: 100 }, zoom: 1, rotate: 0, fit: 'contain' },
-    paper: { label: '📖 논문',  size: { w: 320, h: 180 }, rate: 1.25, filters: { brightness: 100, contrast: 100, saturate: 100 }, zoom: 1, rotate: 0, fit: 'contain' },
-    game:  { label: '🎮 공략',  size: { w: 400, h: 225 }, rate: 1,    filters: { brightness: 100, contrast: 100, saturate: 100 }, zoom: 1, rotate: 0, fit: 'contain' },
-    music: { label: '🎧 음악',  size: { w: 240, h: 135 }, rate: 1,    filters: { brightness: 100, contrast: 100, saturate: 100 }, zoom: 1, rotate: 0, fit: 'contain' },
-    night: { label: '🌙 야간',  size: { w: 480, h: 270 }, rate: 1,    filters: { brightness: 115, contrast: 110, saturate: 100 }, zoom: 1, rotate: 0, fit: 'contain' },
-  };
-  const PRESET_KEYS = ['basic', 'call', 'paper', 'game', 'music', 'night'];
-
-  // ─────────────────────────────────────────────────────────────
-  // 유틸
-  // ─────────────────────────────────────────────────────────────
-  function el(doc, tag, attrs, children) {
-    const node = doc.createElement(tag);
-    if (attrs) for (const k in attrs) {
-      if (k === 'class') node.className = attrs[k];
-      else if (k === 'text') node.textContent = attrs[k];
-      else node.setAttribute(k, attrs[k]);
-    }
-    if (children) children.forEach((c) => c && node.appendChild(c));
-    return node;
-  }
-
+"use strict";
+(() => {
+  // src/util.ts
+  var clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
   function fmtTime(sec) {
-    if (!isFinite(sec) || sec < 0) return '0:00';
+    if (!Number.isFinite(sec) || sec < 0) sec = 0;
     sec = Math.floor(sec);
-    const h = Math.floor(sec / 3600);
-    const m = Math.floor((sec % 3600) / 60);
-    const s = sec % 60;
-    const mm = h ? String(m).padStart(2, '0') : String(m);
-    return (h ? h + ':' : '') + mm + ':' + String(s).padStart(2, '0');
+    const h2 = Math.floor(sec / 3600);
+    const m = Math.floor(sec % 3600 / 60);
+    const s = String(sec % 60).padStart(2, "0");
+    return h2 ? `${h2}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
+  }
+  function debounce(fn, ms) {
+    let timer;
+    let last = null;
+    const run = () => {
+      clearTimeout(timer);
+      timer = void 0;
+      if (last) {
+        const a = last;
+        last = null;
+        fn(...a);
+      }
+    };
+    const d = ((...args) => {
+      last = args;
+      clearTimeout(timer);
+      timer = setTimeout(run, ms);
+    });
+    d.flush = run;
+    return d;
+  }
+  function warn(...args) {
+    console.warn("[video-pip]", ...args);
+  }
+  function isTopFrame() {
+    try {
+      return window.top === window;
+    } catch {
+      return false;
+    }
+  }
+  function pipWindowSize(v, longEdge) {
+    const ar = v.videoWidth > 0 && v.videoHeight > 0 ? v.videoWidth / v.videoHeight : 16 / 9;
+    let w = ar >= 1 ? longEdge : longEdge * ar;
+    let h2 = ar >= 1 ? longEdge / ar : longEdge;
+    const k = Math.min(1, screen.availWidth * 0.9 / w, screen.availHeight * 0.9 / h2);
+    return { width: Math.round(w * k), height: Math.round(h2 * k) };
   }
 
-  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  // src/media.ts
+  var RATE_CYCLE = [0.5, 1, 1.25, 1.5, 2];
+  var RATE_MIN = 0.25;
+  var RATE_MAX = 4;
+  var isLive = (v) => v.duration === Infinity;
+  function seekRange(v) {
+    if (Number.isFinite(v.duration) && v.duration > 0) return { start: 0, end: v.duration };
+    const s = v.seekable;
+    if (s && s.length) return { start: s.start(0), end: s.end(s.length - 1) };
+    return null;
+  }
+  function togglePlay(v) {
+    if (v.paused || v.ended) v.play()?.catch(() => {
+    });
+    else v.pause();
+  }
+  function seekBy(v, sec) {
+    const r = seekRange(v);
+    if (r) v.currentTime = clamp(v.currentTime + sec, r.start, r.end);
+  }
+  function seekToRatio(v, ratio) {
+    const r = seekRange(v);
+    if (r) v.currentTime = r.start + clamp(ratio, 0, 1) * (r.end - r.start);
+  }
+  function toLiveEdge(v) {
+    const r = seekRange(v);
+    if (r) v.currentTime = Math.max(r.start, r.end - 1);
+  }
+  function changeVolume(v, delta) {
+    v.volume = clamp(Math.round((v.volume + delta) * 100) / 100, 0, 1);
+    if (delta > 0) v.muted = false;
+  }
+  function toggleMute(v) {
+    v.muted = !v.muted;
+    if (!v.muted && v.volume === 0) v.volume = 0.5;
+  }
+  function cycleRate(v) {
+    v.playbackRate = RATE_CYCLE.find((r) => r > v.playbackRate + 1e-3) ?? RATE_CYCLE[0];
+  }
+  function nudgeRate(v, delta) {
+    v.playbackRate = clamp(Math.round((v.playbackRate + delta) * 100) / 100, RATE_MIN, RATE_MAX);
+  }
 
-  // ─────────────────────────────────────────────────────────────
-  // ConfigManager — 사이트별 설정 저장/로드
-  // ─────────────────────────────────────────────────────────────
-  const ConfigManager = (function () {
-    const KEY = '__videoPip_cfg';
-    let state = JSON.parse(JSON.stringify(DEFAULTS));
-    let saveTimer = null;
-
-    // 손상/구버전 값 방어: 타입·범위 정규화
-    function sanitize(s) {
-      const num = (v, d) => (typeof v === 'number' && isFinite(v)) ? v : d;
-      s.defaultRate = clamp(num(s.defaultRate, 1), MIN_RATE, MAX_RATE);
-      s.seekStep = clamp(num(s.seekStep, 5), 1, 60);
-      s.zoom = clamp(num(s.zoom, 1), 1, 3);
-      s.rotate = ((Math.round(num(s.rotate, 0) / 90) * 90) % 360 + 360) % 360;
-      if (s.fit !== 'contain' && s.fit !== 'cover') s.fit = 'contain';
-      const f = s.filters || {};
-      s.filters = {
-        brightness: clamp(num(f.brightness, 100), 0, 300),
-        contrast: clamp(num(f.contrast, 100), 0, 300),
-        saturate: clamp(num(f.saturate, 100), 0, 300),
-      };
-      const ps = s.pipSize || {};
-      s.pipSize = { w: clamp(num(ps.w, 480) | 0, 200, 1920), h: clamp(num(ps.h, 270) | 0, 120, 1080) };
-      s.dim = clamp(num(s.dim, 100), 50, 100);
-      const sub = s.subtitles || {};
-      s.subtitles = {
-        enabled: sub.enabled !== false,
-        size: clamp(num(sub.size, 100), 50, 200),
-        position: sub.position === 'top' ? 'top' : 'bottom',
-        bg: clamp(num(sub.bg, 50), 0, 100),
-      };
-      if (!s.hotkeys || typeof s.hotkeys !== 'object') s.hotkeys = Object.assign({}, DEFAULTS.hotkeys);
-      if (!PRESETS[s.activePreset]) s.activePreset = 'basic';
-      if (['tl', 'tr', 'bl', 'br'].indexOf(s.miniCorner) === -1) s.miniCorner = 'br';
-      return s;
-    }
-
-    // 저장본 스키마 마이그레이션(구버전 → 현재). version 미기록 저장본은 0으로 간주.
-    function migrate(p) {
-      const from = (typeof p.version === 'number') ? p.version : 0;
-      if (from >= DEFAULTS.version) return p;
-      // 예) if (from < 2) { p.새필드 = 변환(p.옛필드); }  ← 스키마 바꿀 때 여기에 추가
-      p.version = DEFAULTS.version;
-      return p;
-    }
-
-    function load() {
-      try {
-        const raw = localStorage.getItem(KEY);
-        if (raw) {
-          const parsed = migrate(JSON.parse(raw));
-          state = Object.assign(JSON.parse(JSON.stringify(DEFAULTS)), parsed);
-          state.filters = Object.assign({}, DEFAULTS.filters, parsed.filters);
-          state.hotkeys = Object.assign({}, DEFAULTS.hotkeys, parsed.hotkeys);
-          state.pipSize = Object.assign({}, DEFAULTS.pipSize, parsed.pipSize);
-        }
-      } catch (e) { console.warn('[PIP] 설정 로드 실패:', e); }
-      sanitize(state);
-      return state;
-    }
-    function persist() {
-      try { localStorage.setItem(KEY, JSON.stringify(state)); }
-      catch (e) { console.warn('[PIP] 설정 저장 실패:', e); }
-    }
-    function save() { clearTimeout(saveTimer); saveTimer = setTimeout(persist, SAVE_DEBOUNCE); }
-
-    return {
-      get: () => state,
-      set(patch) { Object.assign(state, patch); save(); },
-      setFilters(patch) { state.filters = Object.assign({}, state.filters, patch); save(); },
-      reset() { state = JSON.parse(JSON.stringify(DEFAULTS)); persist(); return state; },
-      saveNow() { clearTimeout(saveTimer); persist(); },
-      load,
+  // src/commands.ts
+  function buildCommands(session) {
+    const on = (fn) => () => {
+      const v = session.video();
+      if (v) fn(v);
     };
-  })();
-
-  // ─────────────────────────────────────────────────────────────
-  // VideoObserver — video 등장/교체 감지 + 대상 선택
-  // ─────────────────────────────────────────────────────────────
-  const VideoObserver = (function () {
-    let onChange = null;
-    let manualPick = null; // 사용자가 멀티영상에서 고른 video(약참조 대용)
-
-    function list() {
-      return Array.from(document.querySelectorAll('video'))
-        .filter((v) => v.isConnected && (v.videoWidth > 0 || v.readyState >= 1 || v.currentSrc));
-    }
-
-    // 대상 선택: 사용자가 고른 것 → 재생 중 최대 면적 → 최대 면적
-    function pickActive() {
-      const vids = list();
-      if (!vids.length) return null;
-      if (manualPick && manualPick.isConnected) return manualPick;
-      manualPick = null;
-      const area = (v) => { const r = v.getBoundingClientRect(); return r.width * r.height; };
-      const playing = vids.filter((v) => !v.paused && !v.ended);
-      const pool = playing.length ? playing : vids;
-      return pool.sort((a, b) => area(b) - area(a))[0];
-    }
-
-    function setManual(v) { manualPick = v; if (onChange) onChange(pickActive()); }
-
-    function start(cb) {
-      onChange = cb;
-      const root = document.documentElement || document;
-      const hasVideo = (n) => n.nodeType === 1 && (n.tagName === 'VIDEO' || (n.querySelector && n.querySelector('video')));
-      const mo = new MutationObserver((muts) => {
-        let dirty = false;
-        outer:
-        for (const m of muts) {
-          for (const n of m.addedNodes) if (hasVideo(n)) { dirty = true; break outer; }
-          for (const n of m.removedNodes) if (hasVideo(n)) { dirty = true; break outer; }
-        }
-        if (dirty && onChange) onChange(pickActive());
-      });
-      mo.observe(root, { childList: true, subtree: true });
-
-      // 유튜브 SPA 영상 전환
-      window.addEventListener('yt-navigate-finish', () => {
-        manualPick = null;
-        setTimeout(() => onChange && onChange(pickActive()), 400);
-      });
-      document.addEventListener('DOMContentLoaded', () => onChange && onChange(pickActive()), { once: true });
-      // 정적 <video>가 뒤늦게(또는 DOM 변화 없이) 재생을 시작하는 사이트 대응 → 재생 시점에 재바인딩
-      document.addEventListener('play', () => onChange && onChange(pickActive()), { capture: true });
-    }
-
-    return { start, pickActive, list, setManual };
-  })();
-
-  // ─────────────────────────────────────────────────────────────
-  // FilterEngine — 밝기/대비/채도 + 줌/회전/미러
-  // ─────────────────────────────────────────────────────────────
-  const FilterEngine = {
-    apply(video, cfg) {
-      if (!video) return;
-      const f = cfg.filters;
-      video.style.filter = `brightness(${f.brightness}%) contrast(${f.contrast}%) saturate(${f.saturate}%)`;
-      const t = [];
-      if (cfg.zoom !== 1) t.push(`scale(${cfg.zoom})`);
-      if (cfg.rotate) t.push(`rotate(${cfg.rotate}deg)`);
-      if (cfg.mirror) t.push('scaleX(-1)');
-      video.style.transform = t.join(' ');
-      video.style.transformOrigin = 'center center';
-      video.style.objectFit = cfg.fit;
-      video.style.opacity = (cfg.dim == null ? 100 : cfg.dim) / 100;
-    },
-    clear(video) {
-      if (!video) return;
-      video.style.filter = '';
-      video.style.transform = '';
-      video.style.objectFit = '';
-      video.style.opacity = '';
-    },
+    return [
+      { id: "pip.toggle", label: "PIP 켜기/끄기", keys: ["Alt+KeyP"], scope: "global", run: () => void session.toggle() },
+      { id: "close", label: "닫기", keys: ["Escape"], scope: "player", run: () => void session.close() },
+      { id: "play", label: "재생/일시정지", keys: ["Space", "KeyK"], scope: "player", run: on(togglePlay) },
+      { id: "back5", label: "5초 뒤로", keys: ["ArrowLeft"], scope: "player", repeat: true, run: on((v) => seekBy(v, -5)) },
+      { id: "fwd5", label: "5초 앞으로", keys: ["ArrowRight"], scope: "player", repeat: true, run: on((v) => seekBy(v, 5)) },
+      { id: "back10", label: "10초 뒤로", keys: ["KeyJ"], scope: "player", repeat: true, run: on((v) => seekBy(v, -10)) },
+      { id: "fwd10", label: "10초 앞으로", keys: ["KeyL"], scope: "player", repeat: true, run: on((v) => seekBy(v, 10)) },
+      { id: "volUp", label: "볼륨 올리기", keys: ["ArrowUp"], scope: "player", repeat: true, run: on((v) => changeVolume(v, 0.05)) },
+      { id: "volDown", label: "볼륨 내리기", keys: ["ArrowDown"], scope: "player", repeat: true, run: on((v) => changeVolume(v, -0.05)) },
+      { id: "mute", label: "음소거", keys: ["KeyM"], scope: "player", run: on(toggleMute) },
+      { id: "rateDown", label: "배속 낮추기", keys: ["BracketLeft"], scope: "player", repeat: true, run: on((v) => nudgeRate(v, -0.25)) },
+      { id: "rateUp", label: "배속 높이기", keys: ["BracketRight"], scope: "player", repeat: true, run: on((v) => nudgeRate(v, 0.25)) },
+      { id: "rateReset", label: "배속 1배로", keys: ["Equal"], scope: "player", run: on((v) => {
+        v.playbackRate = 1;
+      }) },
+      { id: "rateCycle", label: "배속 바꾸기", keys: [], scope: "player", run: on(cycleRate) }
+    ];
+  }
+  function comboOf(e) {
+    const parts = [];
+    if (e.ctrlKey) parts.push("Ctrl");
+    if (e.altKey) parts.push("Alt");
+    if (e.shiftKey) parts.push("Shift");
+    if (e.metaKey) parts.push("Meta");
+    parts.push(e.code || e.key);
+    return parts.join("+");
+  }
+  var LABELS = {
+    ArrowLeft: "←",
+    ArrowRight: "→",
+    ArrowUp: "↑",
+    ArrowDown: "↓",
+    BracketLeft: "[",
+    BracketRight: "]",
+    Equal: "=",
+    Escape: "Esc"
   };
-
-  // ─────────────────────────────────────────────────────────────
-  // SubtitleEngine — 사이트 자막을 PiP 창으로 가져와 렌더
-  //   ① 네이티브 textTrack(cuechange) ② 유튜브 자막 DOM 미러(폴백)
-  // ─────────────────────────────────────────────────────────────
-  const SubtitleEngine = (function () {
-    let active = null; // { video, target, tracks:[[tr,fn,mode]], poll }
-
-    function styleTarget(target, cfg) {
-      const s = cfg.subtitles;
-      target.style.display = s.enabled ? 'block' : 'none';
-      target.style.fontSize = (s.size / 100 * 1.8) + 'vw';
-      target.classList.toggle('top', s.position === 'top');
-      target.style.background = s.bg > 0 ? `rgba(0,0,0,${s.bg / 100})` : 'transparent';
+  function keyLabel(combo) {
+    return combo.split("+").map((p) => LABELS[p] ?? p.replace(/^(Key|Digit)/, "")).join("+");
+  }
+  var TEXT_INPUTS = /* @__PURE__ */ new Set(["text", "search", "email", "url", "tel", "password", "number", "date", "datetime-local", "month", "time", "week"]);
+  function isEditable(t) {
+    const el = t;
+    if (!el || el.nodeType !== 1) return false;
+    if (el.isContentEditable) return true;
+    if (el.tagName === "TEXTAREA" || el.tagName === "SELECT") return true;
+    return el.tagName === "INPUT" && TEXT_INPUTS.has(el.type);
+  }
+  function createKeymap(commands) {
+    const byKey = /* @__PURE__ */ new Map();
+    const byId = /* @__PURE__ */ new Map();
+    for (const c of commands) {
+      byId.set(c.id, c);
+      for (const k of c.keys) byKey.set(k, c);
     }
-    function setText(target, txt) {
-      target.textContent = txt || '';
-      target.style.visibility = txt ? 'visible' : 'hidden';
-    }
-    function strip(t) { return (t || '').replace(/<[^>]+>/g, '').trim(); }
-
-    function update() {
-      if (!active) return;
-      let txt = '';
-      for (const [tr] of active.tracks) {
-        const cues = tr.activeCues;
-        if (cues && cues.length) { for (let i = 0; i < cues.length; i++) txt += strip(cues[i].text) + '\n'; }
+    return {
+      handle(e, scope) {
+        if (e.isComposing || isEditable(e.composedPath?.()[0] ?? e.target)) return false;
+        const c = byKey.get(comboOf(e));
+        if (!c || scope === "global" && c.scope !== "global") return false;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (!e.repeat || c.repeat) c.run();
+        return true;
+      },
+      run(id) {
+        byId.get(id)?.run();
+      },
+      hint(id) {
+        const c = byId.get(id);
+        if (!c) return "";
+        return c.keys.length ? `${c.label} (${c.keys.map(keyLabel).join(" / ")})` : c.label;
       }
-      txt = txt.trim();
-      if (!txt) { // 유튜브 자막 DOM 폴백
-        const segs = document.querySelectorAll('.ytp-caption-segment');
-        if (segs.length) { let t = ''; segs.forEach((s) => t += s.textContent + '\n'); txt = t.trim(); }
-      }
-      setText(active.target, txt);
-    }
+    };
+  }
 
-    function start(video, target, cfg) {
-      stop();
-      active = { video, target, tracks: [], poll: null };
-      styleTarget(target, cfg);
-      const tracks = video.textTracks || [];
-      const bind = () => {
-        for (let i = 0; i < tracks.length; i++) {
-          const tr = tracks[i];
-          if (tr.kind !== 'captions' && tr.kind !== 'subtitles') continue;
-          if (tr.mode === 'disabled') continue;          // 사용자가 끈 자막은 강제로 켜지 않음
-          if (active.tracks.some(([t]) => t === tr)) continue;
-          const orig = tr.mode;
-          tr.mode = 'hidden';                              // 네이티브 렌더 끄고 cue만 수신
-          const fn = update;
-          tr.addEventListener('cuechange', fn);
-          active.tracks.push([tr, fn, orig]);
-        }
-      };
-      bind();
-      try { tracks.addEventListener && tracks.addEventListener('addtrack', bind); active._bind = bind; active._tracks = tracks; } catch (e) {}
-      active.poll = setInterval(() => { bind(); update(); }, 300); // YT DOM + 늦게 뜨는 트랙 대응
-      if (!cfg.subtitles.enabled) setText(target, '');
-    }
-    function restyle(cfg) { if (active) styleTarget(active.target, cfg); }
-    function stop() {
-      if (!active) return;
-      active.tracks.forEach(([tr, fn, orig]) => { try { tr.removeEventListener('cuechange', fn); tr.mode = orig; } catch (e) {} });
-      try { active._tracks && active._tracks.removeEventListener && active._tracks.removeEventListener('addtrack', active._bind); } catch (e) {}
-      clearInterval(active.poll);
-      active = null;
-    }
-    return { start, stop, restyle };
-  })();
-
-  // ─────────────────────────────────────────────────────────────
-  // SleepTimer — N분 후 정지 / 영상 끝나면 닫기
-  // ─────────────────────────────────────────────────────────────
-  const SleepTimer = (function () {
-    let t = null, endFn = null, vid = null, mode = 'off';
-    function clear() {
-      if (t) { clearTimeout(t); t = null; }
-      if (endFn && vid) { try { vid.removeEventListener('ended', endFn); } catch (e) {} }
-      endFn = null; vid = null; mode = 'off';
-    }
-    function set(m) {
-      clear();
-      mode = m || 'off';
-      if (mode === 'off') return;
-      vid = PipController.getVideo();
-      if (!vid) { Toast.show('💤 영상을 먼저 재생한 뒤 슬립 타이머를 설정하세요.'); mode = 'off'; return; }
-      if (mode === 'end') {
-        endFn = () => { Toast.show('💤 영상이 끝나 PIP를 닫습니다.'); PipController.exit(); };
-        vid.addEventListener('ended', endFn, { once: true });
-        Toast.show('💤 영상이 끝나면 PIP를 닫습니다.');
-        return;
-      }
-      const min = parseInt(mode, 10);
-      if (min > 0) {
-        t = setTimeout(() => { const v = PipController.getVideo(); if (v) v.pause(); Toast.show('💤 슬립 타이머 — 영상을 일시정지했어요.'); t = null; mode = 'off'; }, min * 60000);
-        Toast.show('💤 ' + min + '분 후 자동으로 일시정지합니다.');
-      }
-    }
-    return { set, clear, get mode() { return mode; } };
-  })();
-
-  // ─────────────────────────────────────────────────────────────
-  // PipController — 핵심: 진입/복원 + PiP 창 컨트롤
-  // ─────────────────────────────────────────────────────────────
-  const PipController = (function () {
-    let current = null; // { mode:'doc'|'legacy', win, video, origin, ctrl }
-    let onStateChange = null;
-    let autoEntered = false;
-
-    const PIP_CSS = `
-      *{box-sizing:border-box;margin:0;padding:0;}
-      html,body{width:100%;height:100%;background:#000;overflow:hidden;
-        font-family:'Malgun Gothic',system-ui,-apple-system,sans-serif;color:#e9eef5;}
-      .stage{position:fixed;inset:0;background:#000;overflow:hidden;}
-      .slot{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#000;}
-      .vpip-video{position:static!important;width:100%!important;height:100%!important;
-        max-width:none!important;max-height:none!important;inset:auto!important;left:auto!important;
-        top:auto!important;right:auto!important;bottom:auto!important;margin:0!important;}
-      .overlay{position:absolute;inset:0;opacity:0;transition:opacity .14s ease;pointer-events:none;}
-      .overlay.show{opacity:1;pointer-events:auto;}
-      .topbar{position:absolute;top:0;left:0;right:0;height:46px;display:flex;align-items:center;gap:8px;
-        padding:0 10px;background:linear-gradient(180deg,rgba(0,0,0,.6),transparent);}
-      .ttl{flex:1;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.9;}
-      .center{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:26px;pointer-events:none;}
-      .center .cbtn{pointer-events:auto;}
-      .cbtn{width:46px;height:46px;border:none;border-radius:50%;cursor:pointer;font-size:20px;
-        background:rgba(20,24,32,.55);color:#fff;display:flex;align-items:center;justify-content:center;}
-      .cbtn.big{width:60px;height:60px;font-size:26px;}
-      .cbtn:hover{background:rgba(79,157,255,.85);}
-      .ibtn{width:30px;height:30px;border:none;border-radius:8px;cursor:pointer;background:transparent;
-        color:#e9eef5;font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center;}
-      .ibtn:hover{color:#4f9dff;background:rgba(255,255,255,.08);}
-      .ibtn.close:hover{color:#ff5b5b;}
-      .bottom{position:absolute;left:0;right:0;bottom:0;padding:0 12px 8px;
-        background:linear-gradient(0deg,rgba(0,0,0,.65),transparent);}
-      .seek{position:relative;height:22px;display:flex;align-items:center;cursor:pointer;}
-      .track{position:relative;height:4px;width:100%;border-radius:4px;background:rgba(255,255,255,.18);overflow:hidden;}
-      .seek:hover .track{height:6px;}
-      .buffered{position:absolute;left:0;top:0;height:100%;background:rgba(255,255,255,.28);width:0;}
-      .played{position:absolute;left:0;top:0;height:100%;background:#4f9dff;width:0;}
-      .thumb{position:absolute;top:50%;width:12px;height:12px;border-radius:50%;background:#4f9dff;
-        transform:translate(-50%,-50%);left:0;box-shadow:0 1px 4px rgba(0,0,0,.5);opacity:.5;transition:opacity .12s;}
-      .seek:hover .thumb{opacity:1;}
-      .tip{position:absolute;bottom:18px;transform:translateX(-50%);background:rgba(20,24,32,.95);
-        padding:2px 6px;border-radius:6px;font-size:11px;white-space:nowrap;display:none;}
-      .row{display:flex;align-items:center;gap:6px;height:34px;}
-      .time{font-size:12px;color:#cfd8e3;min-width:90px;}
-      .spd{font-size:12px;font-weight:700;padding:3px 7px;border:none;border-radius:7px;cursor:pointer;
-        background:rgba(255,255,255,.08);color:#e9eef5;}
-      .spd.boost{color:#ffb84f;}
-      .vol{-webkit-appearance:none;appearance:none;width:72px;height:4px;border-radius:4px;
-        background:rgba(255,255,255,.18);outline:none;}
-      .vol::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:#fff;cursor:pointer;}
-      .grow{flex:1;}
-      .hint{position:absolute;left:50%;bottom:48px;transform:translateX(-50%);background:#4f9dff;color:#fff;
-        font-size:12px;padding:8px 12px;border-radius:10px;max-width:90%;line-height:1.5;box-shadow:0 6px 18px rgba(0,0,0,.4);}
-      .hint button{display:block;margin:6px auto 0;background:rgba(255,255,255,.25);border:none;color:#fff;
-        border-radius:6px;padding:3px 10px;cursor:pointer;font-size:11px;}
-      .subs{position:absolute;left:50%;bottom:11%;transform:translateX(-50%);max-width:92%;text-align:center;
-        color:#fff;font-weight:600;line-height:1.35;text-shadow:0 1px 3px rgba(0,0,0,.95);padding:1px 8px;
-        border-radius:6px;white-space:pre-wrap;pointer-events:none;z-index:5;}
-      .subs.top{bottom:auto;top:8%;}
-      button:focus-visible,input:focus-visible{outline:2px solid #4f9dff;outline-offset:2px;}
-      .stage.mini .center .cbtn:not(.big){display:none;}
-      .stage.mini .cbtn.big{width:46px;height:46px;font-size:20px;}
-      .stage.mini .time{min-width:0;}
-      .stage.mini .vol{width:48px;}
-      .stage.compact .center{display:none;}
-      .stage.compact .opt-hide{display:none;}
-      .stage.compact .vol{display:none;}
-      .pop{position:absolute;right:10px;bottom:54px;width:210px;background:rgba(22,26,34,.97);
-        border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:11px;display:none;z-index:10;
-        box-shadow:0 8px 24px rgba(0,0,0,.5);}
-      .pop.show{display:block;}
-      .pop .pr{display:flex;align-items:center;gap:8px;margin:8px 0;font-size:11px;}
-      .pop .pr .pl{width:34px;opacity:.7;}
-      .pop .pr input[type=range]{-webkit-appearance:none;appearance:none;flex:1;height:4px;border-radius:4px;
-        background:rgba(255,255,255,.18);outline:none;}
-      .pop .pr input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:#4f9dff;cursor:pointer;}
-      .pop .pr .pv{width:44px;text-align:right;color:#4f9dff;font-weight:700;}
-      .pop .prow{display:flex;gap:5px;margin-top:9px;}
-      .pop .pbtn2{flex:1;padding:6px 0;border:none;border-radius:7px;background:rgba(255,255,255,.08);color:#e9eef5;font-size:11px;cursor:pointer;}
-      .pop .pbtn2:hover{background:rgba(255,255,255,.16);}
-      .pop .pbtn2.active{background:#4f9dff;color:#fff;}
-      .help{position:absolute;inset:0;background:rgba(0,0,0,.85);display:none;z-index:20;padding:18px 20px;overflow:auto;}
-      .help.show{display:block;}
-      .help h4{font-size:13px;margin:0 0 10px;color:#4f9dff;}
-      .help .hk{font-size:12px;line-height:1.95;}
-      .help .hk b{display:inline-block;min-width:78px;color:#4f9dff;}
-      .help .hclose{position:absolute;top:10px;right:12px;}
-    `;
-
-    function isActive() { return !!current; }
-    function getVideo() { return current ? current.video : null; }
-    function setOnStateChange(fn) { onStateChange = fn; }
-    function notify() { if (onStateChange) onStateChange(isActive()); }
-
-    // ── 진입 ──
-    async function enter(video, opts) {
-      video = video || MiniPlayer.getVideo() || VideoObserver.pickActive();
-      if (!video) { Toast.show('🔍 이 페이지에서 영상을 찾지 못했어요. 영상을 한 번 재생한 뒤 다시 시도해 주세요.'); return; }
-      if (current) await exit();
-      try { MiniPlayer.exit(); } catch (e) {} // 미니플레이어가 잡고 있던 video를 원위치로 회수 후 진입
-      autoEntered = !!(opts && opts.auto);
-      const cfg = ConfigManager.get();
-
-      if (SUPPORTS_DOC_PIP) {
+  // src/config.ts
+  var DEFAULTS = {
+    schema: 2,
+    pipLongEdge: 480,
+    autoTabPip: false,
+    launcher: true,
+    disabledSites: [],
+    hinted: false
+  };
+  var LONG_EDGE_MIN = 240;
+  var LONG_EDGE_MAX = 1920;
+  var KEY = "vpip:v2";
+  var V1_KEY = "__videoPip_cfg";
+  function sanitize(raw) {
+    const r = raw && typeof raw === "object" ? raw : {};
+    const bool = (v, d) => typeof v === "boolean" ? v : d;
+    const num = (v, d) => typeof v === "number" && Number.isFinite(v) ? v : d;
+    const sites = Array.isArray(r.disabledSites) ? r.disabledSites.filter((s) => typeof s === "string" && s.length > 0 && s.length < 256) : [];
+    return {
+      schema: 2,
+      pipLongEdge: Math.round(clamp(num(r.pipLongEdge, DEFAULTS.pipLongEdge), LONG_EDGE_MIN, LONG_EDGE_MAX)),
+      autoTabPip: bool(r.autoTabPip, DEFAULTS.autoTabPip),
+      launcher: bool(r.launcher, DEFAULTS.launcher),
+      disabledSites: [...new Set(sites)].slice(0, 500),
+      hinted: bool(r.hinted, DEFAULTS.hinted)
+    };
+  }
+  function migrateV1(raw) {
+    const r = raw && typeof raw === "object" ? raw : {};
+    const out = {};
+    const { w, h: h2 } = r.pipSize ?? {};
+    if (typeof w === "number" && typeof h2 === "number") out.pipLongEdge = Math.max(w, h2);
+    if (typeof r.autoPip === "boolean") out.autoTabPip = r.autoPip;
+    if (typeof r.onboarded === "boolean") out.hinted = r.onboarded;
+    return out;
+  }
+  function siteKey(hostname) {
+    return hostname.toLowerCase().replace(/^(www|m)\./, "");
+  }
+  function gmBackend() {
+    if (typeof GM_getValue !== "function" || typeof GM_setValue !== "function") return null;
+    const get = GM_getValue, set = GM_setValue;
+    return { read: () => get(KEY, null), write: (cfg) => set(KEY, cfg) };
+  }
+  function localBackend(storage) {
+    let memory = null;
+    return {
+      read() {
+        if (!storage) return memory;
+        const s = storage.getItem(KEY);
+        if (s == null) return null;
         try {
-          const w = clamp(cfg.pipSize.w | 0, 200, 1920);
-          const h = clamp(cfg.pipSize.h | 0, 120, 1080);
-          const pipWin = await documentPictureInPicture.requestWindow({ width: w, height: h });
-          try { mountDoc(pipWin, video, cfg); }
-          catch (err) { console.error('[PIP] PiP 구성 실패, 복원 시도:', err); try { restore(); } catch (e2) {} try { pipWin.close(); } catch (e2) {} }
-          return;
+          return JSON.parse(s);
+        } catch {
+          return {};
+        }
+      },
+      write(cfg) {
+        memory = cfg;
+        try {
+          storage?.setItem(KEY, JSON.stringify(cfg));
         } catch (e) {
-          console.warn('[PIP] Document PiP 실패, 레거시 시도:', e && e.message);
+          warn("설정 저장 실패", e);
         }
       }
-      // 폴백: 레거시
+    };
+  }
+  function safeLocalStorage() {
+    try {
+      const s = window.localStorage;
+      s.getItem(KEY);
+      return s;
+    } catch {
+      return null;
+    }
+  }
+  function createConfig(backend, host2, v1) {
+    let raw = null;
+    try {
+      raw = backend.read();
+    } catch (e) {
+      warn("설정 읽기 실패", e);
+    }
+    let migrated = false;
+    if (raw == null && v1) {
       try {
-        if (document.pictureInPictureEnabled && !video.disablePictureInPicture) {
-          video.playbackRate = cfg.defaultRate;
-          await video.requestPictureInPicture();
-          current = { mode: 'legacy', video };
-          video.addEventListener('leavepictureinpicture', () => { current = null; notify(); }, { once: true });
-          notify();
-          Toast.show('ℹ️ 이 브라우저는 기본 PIP로 동작합니다(커스텀 컨트롤은 Chrome/Edge에서 지원).');
-        } else {
-          Toast.show('이 브라우저/영상은 PIP를 지원하지 않습니다.');
+        const old = v1.getItem(V1_KEY);
+        if (old) {
+          raw = { ...DEFAULTS, ...migrateV1(JSON.parse(old)) };
+          v1.removeItem(V1_KEY);
+          migrated = true;
         }
       } catch (e) {
-        Toast.show('PIP를 열 수 없습니다: ' + (e && e.message || e));
+        warn("v1 설정 이관 실패", e);
       }
     }
-
-    function mountDoc(pipWin, video, cfg) {
-      // 1) 원위치 기억(자리표시자 + 인라인 스타일 스냅샷)
-      const anchor = document.createComment('vpip-anchor');
-      video.parentNode.insertBefore(anchor, video);
-      const origin = { anchor, parent: video.parentNode, styleSnap: video.getAttribute('style') };
-
-      // 2) 스타일(adoptedStyleSheets — 사이트 CSP 회피)
-      try {
-        const sheet = new pipWin.CSSStyleSheet();
-        sheet.replaceSync(PIP_CSS);
-        pipWin.document.adoptedStyleSheets = [sheet];
-      } catch (e) {
-        const st = pipWin.document.createElement('style'); st.textContent = PIP_CSS;
-        pipWin.document.head.appendChild(st);
-      }
-
-      // 3) 스테이지/컨트롤 구성(이 시점엔 video가 아직 원위치)
-      const ctrl = buildStage(pipWin, video, cfg);
-
-      // 4) current·복원 핸들러를 video 이동 "전에" 등록(구성 중 throw 대비)
-      current = { mode: 'doc', win: pipWin, video, origin, ctrl };
-      pipWin.addEventListener('pagehide', () => restore(), { once: true });
-
-      // 5) 실제 video를 PiP 창으로 이동
-      video.classList.add('vpip-video');
-      ctrl.slot.appendChild(video); // ★ 원본 video를 PiP 창으로 이동
-      video.playbackRate = cfg.defaultRate;
-      try { video.preservesPitch = cfg.preservePitch; } catch (e) {}
-      FilterEngine.apply(video, cfg);
-      SubtitleEngine.start(video, ctrl.subs, cfg);
-
-      notify();
-    }
-
-    // ── PiP 창 내부 컨트롤 ──
-    function buildStage(pipWin, video, cfg) {
-      const doc = pipWin.document;
-      const stage = el(doc, 'div', { class: 'stage' });
-      const slot = el(doc, 'div', { class: 'slot' });
-
-      // 상단바
-      const ttl = el(doc, 'span', { class: 'ttl', text: document.title || location.hostname });
-      const homeBtn = el(doc, 'button', { class: 'ibtn', title: '페이지로 돌아가기', 'aria-label': '페이지로 돌아가기', text: '🏠' });
-      const sizeBtn = el(doc, 'button', { class: 'ibtn', title: '창 크기 전환', 'aria-label': '창 크기 전환', text: '⤢' });
-      const helpBtn = el(doc, 'button', { class: 'ibtn', title: '도움말 (?)', 'aria-label': '도움말', text: '❓' });
-      const closeBtn = el(doc, 'button', { class: 'ibtn close', title: '닫기 (Esc)', 'aria-label': '닫기', text: '✕' });
-      const topbar = el(doc, 'div', { class: 'topbar' }, [ttl, sizeBtn, helpBtn, homeBtn, closeBtn]);
-
-      // 중앙
-      const backBtn = el(doc, 'button', { class: 'cbtn', title: '10초 뒤로', 'aria-label': '10초 뒤로', text: '⟲' });
-      const playC = el(doc, 'button', { class: 'cbtn big', title: '재생/일시정지', 'aria-label': '재생/일시정지', text: '⏸' });
-      const fwdBtn = el(doc, 'button', { class: 'cbtn', title: '10초 앞으로', 'aria-label': '10초 앞으로', text: '⟳' });
-      const center = el(doc, 'div', { class: 'center' }, [backBtn, playC, fwdBtn]);
-
-      // 하단: 시크바
-      const buffered = el(doc, 'div', { class: 'buffered' });
-      const played = el(doc, 'div', { class: 'played' });
-      const thumb = el(doc, 'div', { class: 'thumb' });
-      const track = el(doc, 'div', { class: 'track' }, [buffered, played, thumb]);
-      const tip = el(doc, 'div', { class: 'tip' });
-      const seek = el(doc, 'div', { class: 'seek' }, [track, tip]);
-
-      // 하단: 컨트롤 행
-      const playB = el(doc, 'button', { class: 'ibtn', title: '재생/일시정지 (Space)', 'aria-label': '재생/일시정지', text: '⏸' });
-      const time = el(doc, 'span', { class: 'time', text: '0:00 / 0:00' });
-      const muteB = el(doc, 'button', { class: 'ibtn', title: '음소거 (M)', 'aria-label': '음소거', text: '🔊' });
-      const vol = el(doc, 'input', { class: 'vol', type: 'range', min: '0', max: '100', 'aria-label': '볼륨', value: String(Math.round(video.volume * 100)) });
-      const spd = el(doc, 'button', { class: 'spd', title: '재생 속도 (클릭하여 순환)', 'aria-label': '재생 속도', text: cfg.defaultRate.toFixed(2) + 'x' });
-      const shot = el(doc, 'button', { class: 'ibtn opt-hide', title: '스크린샷 (S)', 'aria-label': '스크린샷', text: '📷' });
-      const rotB = el(doc, 'button', { class: 'ibtn opt-hide', title: '90° 회전 (R)', 'aria-label': '90도 회전', text: '🔄' });
-      const gearB = el(doc, 'button', { class: 'ibtn opt-hide', title: '설정 (배속·필터·회전)', 'aria-label': '설정', text: '⚙️' });
-      const row = el(doc, 'div', { class: 'row' }, [playB, time, el(doc, 'span', { class: 'grow' }), muteB, vol, spd, rotB, shot, gearB]);
-
-      const bottom = el(doc, 'div', { class: 'bottom' }, [seek, row]);
-      const pop = buildPopover(doc, video);
-      const help = buildHelp(doc);
-      const subs = el(doc, 'div', { class: 'subs' + (cfg.subtitles.position === 'top' ? ' top' : '') });
-      const overlay = el(doc, 'div', { class: 'overlay' }, [topbar, center, bottom]);
-
-      stage.appendChild(slot);
-      stage.appendChild(subs);
-      stage.appendChild(overlay);
-      stage.appendChild(pop.root);
-      stage.appendChild(help.root);
-      doc.body.appendChild(stage);
-
-      // 창 너비에 따른 컨트롤 단계 축소
-      const applyCompact = () => { const w = pipWin.innerWidth || 480; stage.classList.toggle('mini', w < 360); stage.classList.toggle('compact', w < 250); };
-      pipWin.addEventListener('resize', applyCompact); applyCompact();
-
-      const vListeners = [];
-      const onV = (type, fn) => { video.addEventListener(type, fn); vListeners.push([type, fn]); };
-      const ctrl = { slot, overlay, playC, playB, time, seek, track, played, buffered, thumb, tip, spd, vol, muteB, subs, vListeners };
-
-      // ── 이벤트 ──
-      const togglePlay = () => { video.paused ? video.play() : video.pause(); };
-      playC.addEventListener('click', togglePlay);
-      playB.addEventListener('click', togglePlay);
-      backBtn.addEventListener('click', () => { video.currentTime = Math.max(0, video.currentTime - 10); });
-      fwdBtn.addEventListener('click', () => { video.currentTime += 10; });
-      homeBtn.addEventListener('click', () => { try { pipWin.close(); } catch (e) {} try { window.focus(); } catch (e) {} });
-      closeBtn.addEventListener('click', () => { try { pipWin.close(); } catch (e) {} });
-      sizeBtn.addEventListener('click', () => {
-        const c = ConfigManager.get();
-        const big = c.pipSize.w < 700;
-        const nw = big ? 900 : 480, nh = big ? 506 : 270;
-        ConfigManager.set({ pipSize: { w: nw, h: nh } });
-        try { pipWin.resizeTo(nw, nh); } catch (e) {}
-      });
-      rotB.addEventListener('click', () => {
-        const c = ConfigManager.get();
-        ConfigManager.set({ rotate: (c.rotate + 90) % 360 });
-        FilterEngine.apply(video, ConfigManager.get());
-      });
-      shot.addEventListener('click', () => screenshot(video));
-      gearB.addEventListener('click', (e) => { e.stopPropagation(); help.root.classList.remove('show'); pop.root.classList.toggle('show'); pop.sync(); });
-      helpBtn.addEventListener('click', (e) => { e.stopPropagation(); pop.root.classList.remove('show'); help.root.classList.toggle('show'); });
-      help.closeBtn.addEventListener('click', () => help.root.classList.remove('show'));
-      muteB.addEventListener('click', () => { video.muted = !video.muted; });
-      vol.addEventListener('input', () => { video.volume = vol.value / 100; video.muted = false; });
-      spd.addEventListener('click', () => cycleRate(video));
-
-      // 시크 드래그
-      let seeking = false;
-      const seekToClient = (clientX) => {
-        const r = track.getBoundingClientRect();
-        const ratio = clamp((clientX - r.left) / r.width, 0, 1);
-        if (isFinite(video.duration)) video.currentTime = ratio * video.duration;
-        return ratio;
-      };
-      seek.addEventListener('pointerdown', (e) => {
-        seeking = true; seek.setPointerCapture(e.pointerId); seekToClient(e.clientX);
-      });
-      seek.addEventListener('pointermove', (e) => {
-        const r = track.getBoundingClientRect();
-        const ratio = clamp((e.clientX - r.left) / r.width, 0, 1);
-        tip.style.display = 'block';
-        tip.style.left = (ratio * 100) + '%';
-        tip.textContent = fmtTime(ratio * (video.duration || 0));
-        if (seeking) seekToClient(e.clientX);
-      });
-      seek.addEventListener('pointerleave', () => { tip.style.display = 'none'; });
-      const endSeek = () => { seeking = false; };
-      seek.addEventListener('pointerup', endSeek);
-      seek.addEventListener('pointercancel', endSeek);
-      seek.addEventListener('lostpointercapture', endSeek);
-      pipWin.addEventListener('pointerup', endSeek);
-
-      // 영상 빈 영역 단일클릭 = 재생토글 / 더블클릭 = 크기 토글 (컨트롤 버튼 클릭은 제외)
-      let clickTimer = null;
-      overlay.addEventListener('click', (e) => {
-        if (e.target !== overlay && !e.target.classList.contains('center')) return;
-        if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; sizeBtn.click(); return; }
-        clickTimer = setTimeout(() => { clickTimer = null; togglePlay(); }, 250);
-      });
-      // 컨트롤이 숨겨진 상태에서 클릭/터치 시 다시 표시
-      stage.addEventListener('click', () => { if (!overlay.classList.contains('show')) showControls(); });
-
-      // 휠: 볼륨 / Shift+휠: 속도
-      stage.addEventListener('wheel', (e) => {
-        e.preventDefault();
-        if (e.shiftKey) { nudgeRate(video, e.deltaY < 0 ? 0.1 : -0.1); }
-        else { video.volume = clamp(video.volume + (e.deltaY < 0 ? 0.05 : -0.05), 0, 1); video.muted = false; vol.value = String(Math.round(video.volume * 100)); }
-      }, { passive: false });
-
-      // 호버 등장 / 자동 숨김
-      let hideTimer = null;
-      const showControls = () => {
-        overlay.classList.add('show');
-        clearTimeout(hideTimer);
-        hideTimer = setTimeout(() => { if (!video.paused && !seeking) overlay.classList.remove('show'); }, CONTROLS_HIDE_MS);
-      };
-      stage.addEventListener('pointermove', showControls);
-      stage.addEventListener('pointerenter', showControls);
-      stage.addEventListener('pointerleave', () => { if (!video.paused && !seeking) overlay.classList.remove('show'); });
-      onV('pause', () => overlay.classList.add('show'));
-      showControls();
-
-      // 상태 동기화
-      const syncPlay = () => { const p = video.paused; const t = p ? '▶' : '⏸'; playC.textContent = t; playB.textContent = t; const lbl = p ? '재생' : '일시정지'; playC.setAttribute('aria-label', lbl); playB.setAttribute('aria-label', lbl); };
-      const syncVol = () => { const m = video.muted || video.volume === 0; muteB.textContent = m ? '🔇' : '🔊'; muteB.setAttribute('aria-label', m ? '음소거 해제' : '음소거'); };
-      onV('play', syncPlay);
-      onV('pause', syncPlay);
-      onV('volumechange', () => { syncVol(); vol.value = String(Math.round(video.volume * 100)); });
-      syncPlay(); syncVol();
-
-      // 진행 업데이트 루프(PiP 창 rAF — 닫히면 자동 종료)
-      function tick() {
-        if (!current || current.win !== pipWin) return;
-        const dur = video.duration;
-        if (isFinite(dur) && dur > 0) {
-          const r = video.currentTime / dur;
-          played.style.width = (r * 100) + '%';
-          thumb.style.left = (r * 100) + '%';
-          if (video.buffered.length) {
-            buffered.style.width = (video.buffered.end(video.buffered.length - 1) / dur * 100) + '%';
-          }
-          time.textContent = fmtTime(video.currentTime) + ' / ' + fmtTime(dur);
-        } else {
-          time.textContent = '● LIVE';
-          played.style.width = '100%';
-        }
-        ctrl.spd.textContent = video.playbackRate.toFixed(2) + 'x';
-        ctrl.spd.classList.toggle('boost', video.playbackRate !== 1);
-        pipWin.requestAnimationFrame(tick);
-      }
-      pipWin.requestAnimationFrame(tick);
-
-      // 첫 진입 힌트(1회)
-      if (!ConfigManager.get().onboarded) {
-        const close = el(doc, 'button', { text: '알겠어요' });
-        const hint = el(doc, 'div', { class: 'hint' }, [
-          el(doc, 'div', { text: '💡 마우스를 올리면 컨트롤이 나타나요 · 휠=볼륨, Shift+휠=배속 · Esc로 닫기' }),
-          close,
-        ]);
-        stage.appendChild(hint);
-        close.addEventListener('click', () => { hint.remove(); ConfigManager.set({ onboarded: true }); ConfigManager.saveNow(); });
-        setTimeout(() => hint.remove(), 8000);
-      }
-
-      // PiP 창 자체 단축키
-      HotkeyManager.attach(doc);
-      doc.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-          if (pop.root.classList.contains('show') || help.root.classList.contains('show')) {
-            pop.root.classList.remove('show'); help.root.classList.remove('show'); e.stopImmediatePropagation(); return;
-          }
-          try { pipWin.close(); } catch (err) {}
-        } else if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
-          pop.root.classList.remove('show'); help.root.classList.toggle('show'); e.preventDefault();
+    let cfg = sanitize(raw);
+    const subs = /* @__PURE__ */ new Set();
+    const save = debounce(() => backend.write(cfg), 300);
+    if (migrated) backend.write(cfg);
+    const set = (patch) => {
+      cfg = sanitize({ ...cfg, ...patch });
+      save();
+      subs.forEach((fn) => {
+        try {
+          fn(cfg);
+        } catch (e) {
+          warn(e);
         }
       });
+    };
+    return {
+      get: () => cfg,
+      set,
+      siteDisabled: () => cfg.disabledSites.includes(host2),
+      setSiteDisabled(off) {
+        const rest = cfg.disabledSites.filter((s) => s !== host2);
+        set({ disabledSites: off ? [...rest, host2] : rest });
+      },
+      subscribe(fn) {
+        subs.add(fn);
+        return () => subs.delete(fn);
+      },
+      flush: () => save.flush()
+    };
+  }
 
-      return ctrl;
-    }
+  // src/styles/page.css
+  var page_default = "/* 원본 페이지에 띄우는 것(⧉ 버튼, 알림). Shadow Root 안이라 사이트 CSS와 섞이지 않는다. */\n:host {\n  all: initial !important;\n  position: fixed !important; top: 0 !important; left: 0 !important;\n  width: 0 !important; height: 0 !important;\n  z-index: 2147483647 !important; pointer-events: none !important;\n}\n* { box-sizing: border-box; }\n.chip {\n  position: fixed; top: 0; right: 0; display: flex; align-items: center; gap: 0; height: 30px; padding: 0 7px;\n  border: 1px solid rgba(255, 255, 255, .2); border-radius: 15px; background: rgba(16, 19, 26, .78);\n  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); box-shadow: 0 2px 10px rgba(0, 0, 0, .35);\n  color: #fff; font: 600 12px/1 system-ui, -apple-system, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;\n  cursor: pointer; pointer-events: auto;\n  opacity: 0; visibility: hidden; transform: translateY(-4px);\n  transition: opacity .15s, transform .15s, visibility 0s linear .15s, background .15s;\n}\n.chip.show { opacity: 1; visibility: visible; transform: none; transition: opacity .15s, transform .15s, visibility 0s, background .15s; }\n.chip:hover, .chip:focus-visible { background: rgba(79, 157, 255, .95); gap: 6px; }\n.chip:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }\n.chip svg { display: block; width: 16px; height: 16px; flex: none; }\n.chip .lbl { max-width: 0; overflow: hidden; white-space: nowrap; transition: max-width .2s; }\n.chip:hover .lbl, .chip:focus-visible .lbl { max-width: 64px; }\n\n.toast {\n  position: fixed; left: 50%; bottom: 32px; max-width: min(520px, calc(100vw - 32px)); transform: translate(-50%, 8px);\n  padding: 10px 16px; border-radius: 12px; background: rgba(16, 19, 26, .94); border: 1px solid rgba(255, 255, 255, .12);\n  box-shadow: 0 10px 30px rgba(0, 0, 0, .45); color: #f1f4f8; text-align: center;\n  font: 600 13px/1.45 system-ui, -apple-system, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;\n  opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none;\n}\n.toast.show { opacity: 1; transform: translate(-50%, 0); }\n@media (prefers-reduced-motion: reduce) { .chip, .chip .lbl, .toast { transition: none !important; } }\n";
 
-    // PiP 창 안 미니 설정 팝오버(배속·밝기·대비·채도·회전·반전)
-    function buildPopover(doc, video) {
-      const cfg = ConfigManager.get();
-      const apply = () => FilterEngine.apply(video, ConfigManager.get());
-      function prow(label, min, max, step, val, fmt, onInput) {
-        const input = el(doc, 'input', { type: 'range', min: String(min), max: String(max), step: String(step), value: String(val), 'aria-label': label });
-        const pv = el(doc, 'span', { class: 'pv', text: fmt(val) });
-        input.addEventListener('input', () => { const v = parseFloat(input.value); pv.textContent = fmt(v); onInput(v); });
-        const root = el(doc, 'div', { class: 'pr' }, [el(doc, 'span', { class: 'pl', text: label }), input, pv]);
-        return { root, set(v) { input.value = String(v); pv.textContent = fmt(v); } };
-      }
-      const rate = prow('배속', MIN_RATE, MAX_RATE, 0.05, video.playbackRate, (v) => v.toFixed(2) + 'x', (v) => { video.playbackRate = v; ConfigManager.set({ defaultRate: v }); });
-      const bri = prow('밝기', 50, 150, 1, cfg.filters.brightness, (v) => v + '%', (v) => { ConfigManager.setFilters({ brightness: v }); apply(); });
-      const con = prow('대비', 50, 150, 1, cfg.filters.contrast, (v) => v + '%', (v) => { ConfigManager.setFilters({ contrast: v }); apply(); });
-      const sat = prow('채도', 0, 200, 1, cfg.filters.saturate, (v) => v + '%', (v) => { ConfigManager.setFilters({ saturate: v }); apply(); });
-      const rotBtn = el(doc, 'button', { class: 'pbtn2', text: '🔄 회전' });
-      const mirBtn = el(doc, 'button', { class: 'pbtn2' + (cfg.mirror ? ' active' : ''), text: '↔ 반전' });
-      const resetBtn = el(doc, 'button', { class: 'pbtn2', text: '↺ 초기화' });
-      rotBtn.addEventListener('click', () => { const c = ConfigManager.get(); ConfigManager.set({ rotate: (c.rotate + 90) % 360 }); apply(); });
-      mirBtn.addEventListener('click', () => { const c = ConfigManager.get(); ConfigManager.set({ mirror: !c.mirror }); mirBtn.classList.toggle('active', !c.mirror); apply(); });
-      resetBtn.addEventListener('click', () => {
-        ConfigManager.set({ rotate: 0, mirror: false, zoom: 1 });
-        ConfigManager.setFilters({ brightness: 100, contrast: 100, saturate: 100 });
-        bri.set(100); con.set(100); sat.set(100); mirBtn.classList.remove('active'); apply();
-      });
-      const prowBtns = el(doc, 'div', { class: 'prow' }, [rotBtn, mirBtn, resetBtn]);
-      const root = el(doc, 'div', { class: 'pop' }, [rate.root, bri.root, con.root, sat.root, prowBtns]);
-      root.addEventListener('click', (e) => e.stopPropagation());
-      // 외부 상태 변화(휠 배속 등) 반영용
-      function sync() {
-        const c = ConfigManager.get();
-        rate.set(video.playbackRate);
-        bri.set(c.filters.brightness); con.set(c.filters.contrast); sat.set(c.filters.saturate);
-        mirBtn.classList.toggle('active', !!c.mirror);
-      }
-      return { root, sync };
-    }
-
-    // 단축키 도움말 오버레이
-    function buildHelp(doc) {
-      const closeBtn = el(doc, 'button', { class: 'ibtn close hclose', title: '닫기', 'aria-label': '도움말 닫기', text: '✕' });
-      const keyData = [
-        ['Space / K', '재생·일시정지'], ['← / →', '5초 이동'], ['J / L', '10초 이동'],
-        ['↑ / ↓', '볼륨'], ['M', '음소거'], ['[ / ] / =', '배속 −/＋ · 리셋'],
-        ['R / F / S', '회전 · 크기 · 스크린샷'], ['휠', '볼륨'], ['Shift+휠', '배속'],
-        ['?', '이 도움말'], ['Esc', '닫기'],
-      ];
-      const hk = el(doc, 'div', { class: 'hk' });
-      keyData.forEach(([k, d]) => hk.appendChild(el(doc, 'div', {}, [el(doc, 'b', { text: k }), el(doc, 'span', { text: ' ' + d })])));
-      const root = el(doc, 'div', { class: 'help' }, [closeBtn, el(doc, 'h4', { text: '⌨️ 단축키' }), hk]);
-      root.addEventListener('click', (e) => { if (e.target === root) root.classList.remove('show'); });
-      return { root, closeBtn };
-    }
-
-    function cycleRate(video) {
-      const steps = [0.5, 1, 1.25, 1.5, 2];
-      const cur = video.playbackRate;
-      let next = steps.find((s) => s > cur + 0.001);
-      if (next === undefined) next = steps[0];
-      video.playbackRate = next;
-      ConfigManager.set({ defaultRate: next });
-    }
-    function nudgeRate(video, d) {
-      const next = clamp(Math.round((video.playbackRate + d) * 100) / 100, MIN_RATE, MAX_RATE);
-      video.playbackRate = next;
-      ConfigManager.set({ defaultRate: next });
-    }
-
-    function screenshot(video) {
-      try {
-        const c = document.createElement('canvas');
-        c.width = video.videoWidth; c.height = video.videoHeight;
-        c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
-        c.toBlob((blob) => {
-          if (!blob) { Toast.show('스크린샷 캡처 실패(보호된 영상).'); return; }
-          const a = document.createElement('a');
-          a.href = URL.createObjectURL(blob);
-          const title = (document.title || '').replace(/[\\/:*?"<>|]+/g, ' ').trim().slice(0, 60) || 'screenshot';
-          a.download = title + '_' + Math.floor(video.currentTime) + 's.png';
-          a.click();
-          setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-        }, 'image/png');
-      } catch (e) {
-        Toast.show('스크린샷 캡처 불가(DRM/교차출처 영상).');
+  // src/dom.ts
+  function h(doc, tag, attrs, ...children) {
+    const el = doc.createElement(tag);
+    if (attrs) {
+      for (const [k, v] of Object.entries(attrs)) {
+        if (v === void 0 || v === false) continue;
+        if (typeof v === "function") el.addEventListener(k.replace(/^on/, ""), v);
+        else if (k === "class") el.className = String(v);
+        else if (k === "text") el.textContent = String(v);
+        else el.setAttribute(k, v === true ? "" : String(v));
       }
     }
-
-    // ── 복원 ──
-    function restore() {
-      SubtitleEngine.stop();
-      SleepTimer.clear();
-      if (!current || current.mode !== 'doc') { current = null; notify(); return; }
-      const { video, origin } = current;
-      try {
-        if (current.ctrl && current.ctrl.vListeners) {
-          current.ctrl.vListeners.forEach(([type, fn]) => video.removeEventListener(type, fn));
-        }
-        video.classList.remove('vpip-video');
-        FilterEngine.clear(video);
-        if (origin.anchor && origin.anchor.parentNode) {
-          origin.anchor.parentNode.insertBefore(video, origin.anchor);
-          origin.anchor.remove();
-        } else if (origin.parent && origin.parent.isConnected) {
-          origin.parent.appendChild(video);
-        }
-        if (origin.styleSnap == null) video.removeAttribute('style');
-        else video.setAttribute('style', origin.styleSnap);
-      } catch (e) { console.warn('[PIP] 복원 중 오류:', e); }
-      current = null;
-      autoEntered = false;
-      notify();
+    for (const c of children) if (c != null && c !== false) el.append(c);
+    return el;
+  }
+  function adoptCss(root2, css) {
+    const doc = root2.nodeType === 9 ? root2 : root2.ownerDocument;
+    const win = doc.defaultView;
+    try {
+      const sheet = new win.CSSStyleSheet();
+      sheet.replaceSync(css);
+      root2.adoptedStyleSheets = [...root2.adoptedStyleSheets, sheet];
+    } catch {
+      const style = doc.createElement("style");
+      style.textContent = css;
+      (root2.nodeType === 9 ? doc.head || doc.documentElement : root2).append(style);
     }
-
-    async function exit() {
-      if (!current) return;
-      if (current.mode === 'doc' && current.win) { try { current.win.close(); } catch (e) {} restore(); }
-      else if (current.mode === 'legacy') { try { await document.exitPictureInPicture(); } catch (e) {} current = null; notify(); }
+  }
+  var ICONS = {
+    play: "M8 5v14l11-7z",
+    pause: "M6 19h4V5H6v14zm8-14v14h4V5h-4z",
+    replay: "M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z",
+    volume: "M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z",
+    muted: "M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z",
+    close: "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z",
+    tune: "M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z",
+    pip: "M19 11h-8v6h8v-6zm4 8V4.98C23 3.88 22.1 3 21 3H3c-1.1 0-2 .88-2 1.98V19c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2 .02H3V4.97h18v14.05z"
+  };
+  var SVG = "http://www.w3.org/2000/svg";
+  function icon(doc, name) {
+    const svg = doc.createElementNS(SVG, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("fill", "currentColor");
+    svg.setAttribute("aria-hidden", "true");
+    const path = doc.createElementNS(SVG, "path");
+    const seek = name === "back10" || name === "fwd10";
+    path.setAttribute("d", ICONS[seek ? "replay" : name]);
+    if (name === "fwd10") path.setAttribute("transform", "matrix(-1 0 0 1 24 0)");
+    svg.append(path);
+    if (seek) {
+      const t = doc.createElementNS(SVG, "text");
+      t.setAttribute("x", "12");
+      t.setAttribute("y", "15.6");
+      t.setAttribute("text-anchor", "middle");
+      t.setAttribute("font-size", "6.5");
+      t.setAttribute("font-weight", "700");
+      t.setAttribute("font-family", "system-ui, sans-serif");
+      t.textContent = "10";
+      svg.append(t);
     }
+    return svg;
+  }
 
-    async function toggle(opts) { if (current) await exit(); else await enter(null, opts); }
-
-    function tryResize(w, h) {
-      if (current && current.mode === 'doc' && current.win) { try { current.win.resizeTo(w, h); } catch (e) {} }
+  // src/launcher.ts
+  var DWELL_MS = 400;
+  var root = null;
+  var host = null;
+  function layer(doc) {
+    if (!root || !host) {
+      host = doc.createElement("video-pip-ui");
+      root = host.attachShadow({ mode: "closed" });
+      adoptCss(root, page_default);
     }
-
-    // SPA 전환/플레이어 재생성 시 새 video로 재바인딩
-    function onActiveVideoChanged(newVideo) {
-      if (!current || current.mode !== 'doc' || !newVideo) return;
-      if (current.video === newVideo && newVideo.isConnected) return;
-      if (current.video && current.video.isConnected) return; // 기존이 살아있으면 유지
-      const oldT = current.video ? current.video.currentTime : 0;
-      const cfg = ConfigManager.get();
-      // ★ 옮기기 "전에" 새 원위치(anchor)를 DOM에 삽입하고 인라인 스타일 스냅샷 저장 (복원 보장)
-      const anchor = document.createComment('vpip-anchor');
-      if (newVideo.parentNode) newVideo.parentNode.insertBefore(anchor, newVideo);
-      current.origin = { anchor, parent: anchor.parentNode || document.body, styleSnap: newVideo.getAttribute('style') };
-      newVideo.classList.add('vpip-video');
-      current.ctrl.slot.appendChild(newVideo);
-      try { newVideo.currentTime = oldT; } catch (e) {}
-      newVideo.playbackRate = cfg.defaultRate;
-      FilterEngine.apply(newVideo, cfg);
-      current.video = newVideo;
+    if (!host.isConnected) doc.documentElement.append(host);
+    return root;
+  }
+  var toastEl = null;
+  var toastTimer;
+  function toast(doc, msg) {
+    const r = layer(doc);
+    if (!toastEl) {
+      toastEl = h(doc, "div", { class: "toast", role: "status" });
+      r.append(toastEl);
     }
-
-    return { enter, exit, toggle, isActive, getVideo, setOnStateChange, tryResize, onActiveVideoChanged, screenshot, cycleRate, nudgeRate, get isAuto() { return autoEntered; }, get mode() { return current ? current.mode : null; } };
-  })();
-
-  // ─────────────────────────────────────────────────────────────
-  // MiniPlayer — 스크롤 이탈 시 원본 페이지 안에서 video를 떠다니는 미니창으로
-  //   PIP API(제스처 필요)와 달리 DOM 이동이라 "완전 자동" 가능. 모든 브라우저 동작.
-  //   원위치엔 같은 크기 spacer를 남겨 레이아웃 보존 + 재진입 감지(spacer가 다시 보이면 복원).
-  // ─────────────────────────────────────────────────────────────
-  const MiniPlayer = (function () {
-    let host, shadow, wrap, slot, subsEl, ov, playC, played, timeEl, current = null; // {video, origin, raf, vL, io}
-    let dragging = false;
-
-    const MINI_CSS = `
-      :host{all:initial;}
-      .mwrap{position:fixed;z-index:2147483646;width:min(480px,36vw);aspect-ratio:16/9;
-        background:#000;border-radius:12px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,.55);
-        font-family:'Malgun Gothic',system-ui,-apple-system,sans-serif;color:#e9eef5;
-        opacity:0;transform:translateY(8px);transition:opacity .2s ease,transform .2s ease;}
-      .mwrap.show{opacity:1;transform:none;}
-      .mwrap.dragging{transition:none;cursor:grabbing;}
-      .mslot{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#000;}
-      .vpip-video{position:static!important;width:100%!important;height:100%!important;max-width:none!important;
-        max-height:none!important;inset:auto!important;left:auto!important;top:auto!important;right:auto!important;
-        bottom:auto!important;margin:0!important;}
-      .mov{position:absolute;inset:0;opacity:0;transition:opacity .14s;pointer-events:none;}
-      .mwrap:hover .mov,.mwrap.paused .mov{opacity:1;pointer-events:auto;}
-      .mtop{position:absolute;top:0;left:0;right:0;height:30px;display:flex;align-items:center;gap:2px;padding:0 5px;
-        background:linear-gradient(180deg,rgba(0,0,0,.7),transparent);cursor:grab;}
-      .mttl{flex:1;font-size:10px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.85;padding-left:3px;}
-      .mb{width:24px;height:24px;border:none;border-radius:6px;background:transparent;color:#e9eef5;font-size:13px;cursor:pointer;
-        display:flex;align-items:center;justify-content:center;line-height:1;flex:none;}
-      .mb:hover{background:rgba(255,255,255,.16);color:#4f9dff;}
-      .mb.x:hover{color:#ff5b5b;}
-      .mb.up:hover{color:#3ddc84;}
-      .mcenter{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;}
-      .mplay{pointer-events:auto;width:48px;height:48px;border:none;border-radius:50%;background:rgba(20,24,32,.5);
-        color:#fff;font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
-      .mplay:hover{background:rgba(79,157,255,.85);}
-      .mbot{position:absolute;left:0;right:0;bottom:0;padding:0 9px 7px;background:linear-gradient(0deg,rgba(0,0,0,.72),transparent);}
-      .mseek{position:relative;height:14px;display:flex;align-items:center;cursor:pointer;}
-      .mtrack{position:relative;height:3px;width:100%;border-radius:3px;background:rgba(255,255,255,.22);}
-      .mseek:hover .mtrack{height:5px;}
-      .mplayed{position:absolute;left:0;top:0;height:100%;background:#4f9dff;width:0;border-radius:3px;}
-      .mtime{font-size:10px;color:#cfd8e3;padding:1px 0 0;}
-      .msubs{position:absolute;left:50%;bottom:15%;transform:translateX(-50%);max-width:92%;text-align:center;color:#fff;
-        font-weight:600;line-height:1.3;text-shadow:0 1px 3px rgba(0,0,0,.95);white-space:pre-wrap;pointer-events:none;font-size:12px;visibility:hidden;}
-      .msubs.top{bottom:auto;top:9%;}
-      button:focus-visible{outline:2px solid #4f9dff;outline-offset:1px;}
-    `;
-
+    const el = toastEl;
+    el.textContent = msg;
+    requestAnimationFrame(() => el.classList.add("show"));
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove("show"), 3200);
+  }
+  function startLauncher(doc, deps) {
+    let chip = null;
+    let target = null;
+    let shown = false;
+    let dwell;
+    let raf = 0;
+    let x = 0, y = 0;
     function ensure() {
-      if (host) return;
-      host = document.createElement('div');
-      host.id = '__video_pip_mini_host';
-      shadow = host.attachShadow({ mode: 'open' });
-      const st = document.createElement('style'); st.textContent = MINI_CSS; shadow.appendChild(st);
-
-      const d = document;
-      slot = el(d, 'div', { class: 'mslot' });
-      subsEl = el(d, 'div', { class: 'msubs' });
-
-      const ttl = el(d, 'span', { class: 'mttl', text: document.title || location.hostname });
-      const upBtn = el(d, 'button', { class: 'mb up', title: '진짜 PIP 창으로 (원본 화질·풀 컨트롤)', 'aria-label': 'PIP로 전환', text: '⤢' });
-      const homeBtn = el(d, 'button', { class: 'mb', title: '원래 위치로 돌아가기', 'aria-label': '원위치 복귀', text: '🏠' });
-      const closeBtn = el(d, 'button', { class: 'mb x', title: '닫기', 'aria-label': '닫기', text: '✕' });
-      const top = el(d, 'div', { class: 'mtop' }, [ttl, upBtn, homeBtn, closeBtn]);
-
-      playC = el(d, 'button', { class: 'mplay', title: '재생/일시정지', 'aria-label': '재생/일시정지', text: '⏸' });
-      const center = el(d, 'div', { class: 'mcenter' }, [playC]);
-
-      played = el(d, 'div', { class: 'mplayed' });
-      const track = el(d, 'div', { class: 'mtrack' }, [played]);
-      const seek = el(d, 'div', { class: 'mseek' }, [track]);
-      timeEl = el(d, 'span', { class: 'mtime', text: '0:00 / 0:00' });
-      const bot = el(d, 'div', { class: 'mbot' }, [seek, timeEl]);
-
-      ov = el(d, 'div', { class: 'mov' }, [top, center, bot]);
-      wrap = el(d, 'div', { class: 'mwrap' }, [slot, subsEl, ov]);
-      shadow.appendChild(wrap);
-      (document.body || document.documentElement).appendChild(host);
-
-      // 컨트롤 이벤트
-      const togglePlay = () => { const v = current && current.video; if (!v) return; v.paused ? v.play() : v.pause(); };
-      playC.addEventListener('click', togglePlay);
-      upBtn.addEventListener('click', () => { const v = current && current.video; if (v) PipController.enter(v); }); // 클릭=제스처 → Document PiP 승격
-      homeBtn.addEventListener('click', () => { // 원래 위치로 스크롤(안 그러면 자동PIP가 즉시 미니 재생성)
-        const sp = current && current.origin && current.origin.spacer;
-        if (sp && sp.scrollIntoView) { try { sp.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {} }
-        exit();
-      });
-      closeBtn.addEventListener('click', () => { const v = current && current.video; exit(); if (v) try { v.pause(); } catch (e) {} });
-      let mseeking = false;
-      const mseekTo = (clientX) => {
-        const v = current && current.video; if (!v || !isFinite(v.duration)) return;
-        const r = track.getBoundingClientRect();
-        v.currentTime = clamp((clientX - r.left) / r.width, 0, 1) * v.duration;
-      };
-      seek.addEventListener('pointerdown', (e) => {
-        mseeking = true;
-        try { seek.setPointerCapture(e.pointerId); } catch (er) {}
-        mseekTo(e.clientX);
-      });
-      seek.addEventListener('pointermove', (e) => { if (mseeking) mseekTo(e.clientX); });
-      const mseekEnd = () => { mseeking = false; };
-      seek.addEventListener('pointerup', mseekEnd);
-      seek.addEventListener('pointercancel', mseekEnd);
-      seek.addEventListener('lostpointercapture', mseekEnd);
-      // 휠=볼륨 / Shift+휠=배속 (PiP 창과 동일 UX)
-      wrap.addEventListener('wheel', (e) => {
-        const v = current && current.video; if (!v) return;
-        e.preventDefault();
-        if (e.shiftKey) PipController.nudgeRate(v, e.deltaY < 0 ? 0.1 : -0.1);
-        else { v.volume = clamp(v.volume + (e.deltaY < 0 ? 0.05 : -0.05), 0, 1); v.muted = false; }
-      }, { passive: false });
-      makeDraggable(top);
-    }
-
-    function applyCorner() {
-      const c = ConfigManager.get().miniCorner;
-      wrap.style.top = wrap.style.bottom = wrap.style.left = wrap.style.right = 'auto';
-      const m = 18;
-      if (c[0] === 't') wrap.style.top = m + 'px'; else wrap.style.bottom = m + 'px';
-      if (c[1] === 'l') wrap.style.left = m + 'px'; else wrap.style.right = m + 'px';
-    }
-
-    function makeDraggable(handle) {
-      let sx, sy, ox, oy;
-      handle.addEventListener('pointerdown', (e) => {
-        if (e.target.closest('button')) return;
-        dragging = true; wrap.classList.add('dragging');
-        const r = wrap.getBoundingClientRect();
-        sx = e.clientX; sy = e.clientY; ox = r.left; oy = r.top;
-        wrap.style.top = oy + 'px'; wrap.style.left = ox + 'px'; wrap.style.right = 'auto'; wrap.style.bottom = 'auto';
-        try { handle.setPointerCapture(e.pointerId); } catch (er) {}
-      });
-      handle.addEventListener('pointermove', (e) => {
-        if (!dragging) return;
-        wrap.style.left = clamp(ox + e.clientX - sx, 0, innerWidth - wrap.offsetWidth) + 'px';
-        wrap.style.top = clamp(oy + e.clientY - sy, 0, innerHeight - wrap.offsetHeight) + 'px';
-      });
-      const end = () => {
-        if (!dragging) return;
-        dragging = false; wrap.classList.remove('dragging');
-        // 가장 가까운 코너로 스냅 + 저장
-        const r = wrap.getBoundingClientRect();
-        const corner = (r.top + r.height / 2 < innerHeight / 2 ? 't' : 'b') + (r.left + r.width / 2 < innerWidth / 2 ? 'l' : 'r');
-        ConfigManager.set({ miniCorner: corner });
-        applyCorner();
-      };
-      handle.addEventListener('pointerup', end);
-      handle.addEventListener('pointercancel', end);
-    }
-
-    function isActive() { return !!current; }
-    function getVideo() { return current ? current.video : null; }
-
-    function enter(video) {
-      if (current || PipController.isActive()) return;
-      video = video || VideoObserver.pickActive();
-      if (!video || !video.parentNode) return;
-      ensure();
-      const cfg = ConfigManager.get();
-
-      // 원위치 보존: 같은 크기 spacer를 끼워 레이아웃 유지 + 재진입 감지 타깃
-      const rect = video.getBoundingClientRect();
-      const spacer = document.createElement('div');
-      spacer.setAttribute('data-vpip-mini-spacer', '1');
-      spacer.style.cssText = 'width:' + Math.round(rect.width) + 'px;height:' + Math.round(rect.height) + 'px;';
-      video.parentNode.insertBefore(spacer, video);
-      const origin = { spacer, parent: video.parentNode, styleSnap: video.getAttribute('style') };
-
-      video.classList.add('vpip-video');
-      slot.appendChild(video); // ★ 원본 video를 미니창으로 이동(같은 document → 재생 유지)
-      try { video.preservesPitch = cfg.preservePitch; } catch (e) {}
-      FilterEngine.apply(video, cfg);
-      SubtitleEngine.start(video, subsEl, cfg);
-      subsEl.classList.toggle('top', cfg.subtitles.position === 'top');
-
-      current = { video, origin, raf: null, vL: [] };
-      applyCorner();
-      requestAnimationFrame(() => wrap.classList.add('show'));
-
-      const onV = (t, fn) => { video.addEventListener(t, fn); current.vL.push([t, fn]); };
-      const syncPlay = () => { const p = video.paused; playC.textContent = p ? '▶' : '⏸'; wrap.classList.toggle('paused', p); };
-      onV('play', syncPlay); onV('pause', syncPlay); syncPlay();
-
-      function tick() {
-        if (!current) return;
-        const dur = video.duration;
-        if (isFinite(dur) && dur > 0) {
-          played.style.width = (video.currentTime / dur * 100) + '%';
-          timeEl.textContent = fmtTime(video.currentTime) + ' / ' + fmtTime(dur);
-        } else { played.style.width = '100%'; timeEl.textContent = '● LIVE'; }
-        current.raf = requestAnimationFrame(tick);
-      }
-      current.raf = requestAnimationFrame(tick);
-
-      // 재진입 감지: spacer(원위치)가 다시 화면에 들어오면 자동 복원
-      try {
-        current.io = new IntersectionObserver((entries) => {
-          if (current && entries[0] && entries[0].intersectionRatio > 0.35) exit();
-        }, { threshold: [0, 0.35] });
-        current.io.observe(spacer);
-      } catch (e) {}
-
-      Toast.show('📺 미니플레이어로 따라갑니다 · ⤢=고화질 PIP · 휠=볼륨');
-    }
-
-    function exit() {
-      if (!current) return;
-      const { video, origin, raf, vL, io } = current;
-      current = null;
-      if (raf) cancelAnimationFrame(raf);
-      if (io) try { io.disconnect(); } catch (e) {}
-      SubtitleEngine.stop();
-      if (vL) vL.forEach(([t, fn]) => { try { video.removeEventListener(t, fn); } catch (e) {} });
-      if (wrap) wrap.classList.remove('show', 'paused');
-      try {
-        video.classList.remove('vpip-video');
-        FilterEngine.clear(video);
-        if (origin.spacer && origin.spacer.parentNode) {
-          origin.spacer.parentNode.insertBefore(video, origin.spacer);
-          origin.spacer.remove();
-        } else if (origin.parent && origin.parent.isConnected) {
-          origin.parent.appendChild(video);
-        }
-        if (origin.styleSnap == null) video.removeAttribute('style');
-        else video.setAttribute('style', origin.styleSnap);
-      } catch (e) { console.warn('[PIP] 미니 복원 오류:', e); }
-    }
-
-    function restyle(cfg) { if (current) { FilterEngine.apply(current.video, cfg); subsEl.classList.toggle('top', cfg.subtitles.position === 'top'); } }
-
-    return { enter, exit, isActive, getVideo, restyle };
-  })();
-
-  // ─────────────────────────────────────────────────────────────
-  // HotkeyManager — 단축키
-  // ─────────────────────────────────────────────────────────────
-  const HotkeyManager = (function () {
-    function combo(e) {
-      const p = [];
-      if (e.ctrlKey) p.push('Ctrl');
-      if (e.altKey) p.push('Alt');
-      if (e.shiftKey && e.key.length === 1) p.push('Shift');
-      let k = e.key;
-      if (k === ' ') k = 'Space';
-      if (k.length === 1) k = k.toLowerCase();
-      p.push(k);
-      return p.join('+');
-    }
-    function keymap() {
-      const hk = ConfigManager.get().hotkeys;
-      const m = {};
-      m[hk.togglePip] = 'togglePip';
-      m['Space'] = 'playPause'; m['k'] = 'playPause';
-      m['ArrowLeft'] = 'back'; m['ArrowRight'] = 'fwd';
-      m['j'] = 'back10'; m['l'] = 'fwd10';
-      m['ArrowUp'] = 'volUp'; m['ArrowDown'] = 'volDown'; m['m'] = 'mute';
-      m[hk.speedDown] = 'speedDown'; m[hk.speedUp] = 'speedUp'; m['='] = 'speedReset';
-      m[hk.screenshot] = 'screenshot'; m['r'] = 'rotate'; m['f'] = 'sizeToggle';
-      return m;
-    }
-    function run(action) {
-      const v = PipController.getVideo() || MiniPlayer.getVideo() || VideoObserver.pickActive();
-      const cfg = ConfigManager.get();
-      switch (action) {
-        case 'togglePip': PipController.toggle(); return;
-        case 'playPause': if (v) v.paused ? v.play() : v.pause(); break;
-        case 'back': if (v) v.currentTime = Math.max(0, v.currentTime - cfg.seekStep); break;
-        case 'fwd': if (v) v.currentTime += cfg.seekStep; break;
-        case 'back10': if (v) v.currentTime = Math.max(0, v.currentTime - 10); break;
-        case 'fwd10': if (v) v.currentTime += 10; break;
-        case 'volUp': if (v) { v.volume = clamp(v.volume + 0.05, 0, 1); v.muted = false; } break;
-        case 'volDown': if (v) { v.volume = clamp(v.volume - 0.05, 0, 1); } break;
-        case 'mute': if (v) v.muted = !v.muted; break;
-        case 'speedUp': if (v) PipController.nudgeRate(v, 0.1); break;
-        case 'speedDown': if (v) PipController.nudgeRate(v, -0.1); break;
-        case 'speedReset': if (v) { v.playbackRate = 1; ConfigManager.set({ defaultRate: 1 }); } break;
-        case 'screenshot': if (v) PipController.screenshot(v); break;
-        case 'rotate': ConfigManager.set({ rotate: (cfg.rotate + 90) % 360 }); FilterEngine.apply(v, ConfigManager.get()); break;
-        case 'sizeToggle': { const big = cfg.pipSize.w < 700; const nw = big ? 900 : 480, nh = big ? 506 : 270; ConfigManager.set({ pipSize: { w: nw, h: nh } }); PipController.tryResize(nw, nh); break; }
-      }
-    }
-    function handle(e, isMain) {
-      const t = e.target;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
-      const action = keymap()[combo(e)];
-      if (!action) return;
-      if (isMain) {
-        const miniOn = MiniPlayer.isActive();
-        const pipMode = PipController.mode; // 'doc' | 'legacy' | null
-        // 아무것도 비활성 → togglePip만 동작(사이트 단축키 보존)
-        if (!miniOn && !pipMode && action !== 'togglePip') return;
-        // Document PiP 창이 따로 떠 있을 땐 메인 페이지 단일키(k/f/m/Space 등)를 사이트에 양보.
-        // PiP 영상 제어는 PiP 창 자체 단축키로 충분. (미니플레이어/레거시 PIP는 페이지 안이라 전체 허용)
-        if (!miniOn && pipMode === 'doc' && action !== 'togglePip' && action !== 'screenshot') return;
-      }
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      run(action);
-    }
-    function attach(doc) { doc.addEventListener('keydown', (e) => handle(e, doc === document), { capture: true }); }
-    return { attach };
-  })();
-
-  // ─────────────────────────────────────────────────────────────
-  // AutoPipManager — 탭 전환 / 뷰포트 이탈 시 자동 PIP
-  // ─────────────────────────────────────────────────────────────
-  const AutoPipManager = (function () {
-    let io = null;
-
-    // 스크롤 이탈 → 미니플레이어(완전 자동, 제스처 불필요)
-    function watch(video) {
-      if (io) { io.disconnect(); io = null; }
-      if (!video) return;
-      io = new IntersectionObserver((entries) => {
-        const e = entries[0];
-        const cfg = ConfigManager.get();
-        if (!cfg.autoPip) return;
-        if (PipController.isActive() || MiniPlayer.isActive()) return; // 이미 PIP/미니면 무시
-        if (e.intersectionRatio === 0 && !video.paused && !video.ended) {
-          MiniPlayer.enter(video);
-        }
-      }, { threshold: [0] });
-      io.observe(video);
-    }
-
-    // 탭 전환 → MediaSession 자동 PIP(Chrome이 제스처 없이 OS PIP를 띄워줌)
-    function setupMediaSession() {
-      if (!('mediaSession' in navigator) || !navigator.mediaSession.setActionHandler) return;
-      try {
-        navigator.mediaSession.setActionHandler('enterpictureinpicture', () => {
-          const cfg = ConfigManager.get();
-          const v = PipController.getVideo() || MiniPlayer.getVideo() || VideoObserver.pickActive();
-          if (!cfg.autoPip || !v || PipController.isActive()) return;
-          // 자동 진입은 제스처가 없어 Document PiP가 불가 → 네이티브 PIP 사용
-          if (document.pictureInPictureEnabled && !v.disablePictureInPicture && !document.pictureInPictureElement) {
-            v.requestPictureInPicture().catch(() => {});
+      if (!chip) {
+        chip = h(
+          doc,
+          "button",
+          { class: "chip", type: "button", title: "PIP로 보기 (Alt+P)", "aria-label": "PIP로 보기 (Alt+P)" },
+          icon(doc, "pip"),
+          h(doc, "span", { class: "lbl", text: "PIP" })
+        );
+        chip.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const v = target;
+          hide();
+          if (v) {
+            deps.tracker.setManual(v);
+            deps.open(v);
           }
         });
-      } catch (e) { /* 일부 브라우저 미지원 */ }
+      }
+      const r = layer(doc);
+      if (chip.parentNode !== r) r.append(chip);
+      return chip;
     }
-
-    function start() {
-      setupMediaSession();
-      // 자동 진입한 PIP도 수동 PIP처럼 "사용자가 직접 닫을 때까지 유지"한다.
-      //  (이전 1.2.2~1.2.3은 탭 복귀 시 자동으로 닫았는데, 다른 탭을 닫아 유튜브로
-      //   돌아오면 자동 PIP가 사라지는 문제가 있어 복귀 자동 닫기를 제거함.)
-    }
-    return { start, watch };
-  })();
-
-  // ─────────────────────────────────────────────────────────────
-  // Toast — 안내 / 클릭 우회
-  // ─────────────────────────────────────────────────────────────
-  const Toast = (function () {
-    let host, shadow, box;
-    function ensure() {
-      if (host) return;
-      host = document.createElement('div');
-      shadow = host.attachShadow({ mode: 'open' });
-      const st = document.createElement('style');
-      st.textContent = `
-        :host{all:initial;}
-        .t{position:fixed;left:50%;bottom:32px;transform:translateX(-50%);z-index:2147483647;
-          background:rgba(22,26,34,.95);backdrop-filter:blur(12px);color:#e9eef5;font-family:'Malgun Gothic',system-ui,sans-serif;
-          border:1px solid rgba(255,255,255,.12);border-radius:999px;padding:10px 18px;font-size:13px;font-weight:600;
-          box-shadow:0 10px 30px rgba(0,0,0,.45);cursor:default;opacity:0;transition:opacity .2s;white-space:nowrap;
-          pointer-events:none;}
-        .t.show{opacity:1;} .t.click{cursor:pointer;border-color:#4f9dff;}
-        .t.show.click{pointer-events:auto;}
-      `;
-      shadow.appendChild(st);
-      box = document.createElement('div'); box.className = 't';
-      shadow.appendChild(box);
-      (document.body || document.documentElement).appendChild(host);
-    }
-    let timer = null;
-    function show(msg, onClick) {
-      ensure();
-      box.textContent = msg;
-      box.classList.toggle('click', !!onClick);
-      box.onclick = onClick ? () => { hide(); onClick(); } : null;
-      box.classList.add('show');
-      clearTimeout(timer);
-      timer = setTimeout(hide, onClick ? 6000 : 3200);
-    }
-    function hide() { if (box) box.classList.remove('show'); }
-    return { show };
-  })();
-
-  // ─────────────────────────────────────────────────────────────
-  // UIManager — 원본 페이지 플로팅 패널
-  // ─────────────────────────────────────────────────────────────
-  const UIManager = (function () {
-    let host, shadow, wrap, panel, pill, els = {}, idleTimer = null;
-
-    const CSS = `
-      :host{all:initial;}
-      /* z-index 2000: 유튜브 팝업(계정 메뉴·화질 메뉴 컨테이너, z≈2200)보다 아래여야
-         사이트 메뉴가 패널 위로 떠서 클릭을 가로채지 않음. 최상위(2147483647)로 올리지 말 것. */
-      .wrap{position:fixed;z-index:2000;top:80px;right:24px;
-        font-family:'Malgun Gothic',-apple-system,system-ui,sans-serif;color:#e9eef5;user-select:none;transition:opacity .25s ease;}
-      .wrap.idle{opacity:.32;pointer-events:none;}
-      .wrap.fs-hide .panel{display:none;}
-      .wrap.fs-hide .pill{display:inline-flex;}
-      .panel{width:256px;padding:14px;background:rgba(22,26,34,.92);backdrop-filter:blur(12px);
-        border:1px solid rgba(255,255,255,.08);border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.45);
-        max-height:calc(100vh - 110px);overflow-y:auto;overscroll-behavior:contain;}
-      .panel::-webkit-scrollbar{width:6px;}
-      .panel::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border-radius:3px;}
-      .panel::-webkit-scrollbar-track{background:transparent;}
-      .panel.hidden{display:none;}
-      .head{display:flex;align-items:center;gap:6px;margin-bottom:12px;cursor:move;}
-      .title{font-size:13px;font-weight:700;flex:1;}
-      .badge{font-size:9px;font-weight:800;padding:2px 5px;border-radius:5px;background:#4f9dff;color:#fff;letter-spacing:.5px;}
-      .iconbtn{width:26px;height:26px;border:none;border-radius:7px;cursor:pointer;background:rgba(255,255,255,.08);color:#e9eef5;font-size:13px;line-height:1;}
-      .iconbtn:hover{background:rgba(255,255,255,.16);}
-      .pipbtn{width:100%;height:44px;border:none;border-radius:10px;cursor:pointer;background:#4f9dff;color:#fff;
-        font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:8px;}
-      .pipbtn:hover{filter:brightness(1.08);}
-      .pipbtn.on{background:rgba(61,220,132,.16);}
-      .pipbtn .dot{display:none;}
-      .pipbtn.on .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#3ddc84;}
-      .toggle{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12px;}
-      .toggle .lbl{flex:1;}
-      .sw{width:40px;height:22px;border-radius:999px;background:rgba(255,255,255,.18);position:relative;cursor:pointer;transition:background .15s;}
-      .sw::after{content:'';position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:left .15s;}
-      .sw.on{background:#3ddc84;} .sw.on::after{left:20px;}
-      .seclabel{font-size:11px;opacity:.55;margin:14px 0 7px;}
-      .grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;}
-      .pbtn{padding:9px 0;border:none;border-radius:9px;cursor:pointer;background:rgba(255,255,255,.08);color:#e9eef5;font-size:11px;font-weight:600;}
-      .pbtn:hover{background:rgba(255,255,255,.16);}
-      .pbtn.active{outline:2px solid #4f9dff;}
-      details{margin-top:12px;border-top:1px solid rgba(255,255,255,.07);padding-top:8px;}
-      summary{cursor:pointer;font-size:12px;font-weight:600;list-style:none;padding:4px 0;}
-      summary::-webkit-details-marker{display:none;}
-      summary::before{content:'▸ ';opacity:.6;}
-      details[open]>summary::before{content:'▾ ';}
-      .grp{margin:6px 0 2px;}
-      .grp>summary{font-size:11px;opacity:.8;}
-      .ctl{display:flex;align-items:center;gap:8px;margin:8px 0;font-size:11px;}
-      .ctl .cl{width:34px;opacity:.7;}
-      .ctl .cv{width:40px;text-align:right;color:#4f9dff;font-weight:700;}
-      .ctl input[type=range]{-webkit-appearance:none;appearance:none;flex:1;height:4px;border-radius:4px;background:rgba(255,255,255,.16);outline:none;}
-      .ctl input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:#4f9dff;cursor:pointer;}
-      .btnrow{display:flex;gap:5px;margin:6px 0;}
-      .minibtn{flex:1;padding:6px 0;border:none;border-radius:7px;background:rgba(255,255,255,.08);color:#e9eef5;font-size:11px;cursor:pointer;}
-      .minibtn:hover{background:rgba(255,255,255,.16);} .minibtn.active{background:#4f9dff;color:#fff;}
-      .resetb{width:100%;margin-top:4px;padding:6px 0;border:none;border-radius:7px;background:rgba(255,255,255,.05);color:#e9eef5;font-size:11px;cursor:pointer;opacity:.85;}
-      .keys{font-size:11px;line-height:1.7;opacity:.8;}
-      .keys b{display:inline-block;min-width:64px;color:#4f9dff;}
-      .note{font-size:10px;opacity:.55;margin-top:6px;line-height:1.4;}
-      button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid #4f9dff;outline-offset:2px;}
-      .vsel{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px;}
-      .vsel .vb{padding:4px 9px;border:none;border-radius:7px;background:rgba(255,255,255,.08);color:#e9eef5;font-size:11px;cursor:pointer;}
-      .vsel .vb.active{background:#4f9dff;color:#fff;}
-      .pill{display:none;align-items:center;gap:6px;cursor:pointer;padding:8px 13px;background:rgba(22,26,34,.92);
-        backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,.08);border-radius:999px;box-shadow:0 6px 18px rgba(0,0,0,.4);font-size:13px;font-weight:700;}
-      .pill.show{display:inline-flex;} .pill .pdot{width:8px;height:8px;border-radius:50%;background:#888;} .pill.on .pdot{background:#3ddc84;}
-      .tip{position:absolute;top:0;right:278px;width:190px;padding:12px;background:#4f9dff;color:#fff;border-radius:10px;
-        font-size:12px;line-height:1.5;box-shadow:0 6px 18px rgba(0,0,0,.4);}
-      .tip::after{content:'';position:absolute;top:18px;right:-6px;border:6px solid transparent;border-left-color:#4f9dff;}
-      .tip button{display:block;margin-top:8px;background:rgba(255,255,255,.25);border:none;color:#fff;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;}
-    `;
-
-    function build() {
-      const cfg = ConfigManager.get();
-      host = document.createElement('div');
-      host.id = '__video_pip_host';
-      shadow = host.attachShadow({ mode: 'open' });
-      const style = document.createElement('style'); style.textContent = CSS; shadow.appendChild(style);
-
-      const d = document;
-      // 헤더
-      const title = el(d, 'span', { class: 'title', text: '🎬 고화질 PIP' });
-      const badge = el(d, 'span', { class: 'badge', text: SUPPORTS_DOC_PIP ? 'HD' : 'BASIC' });
-      const collapseBtn = el(d, 'button', { class: 'iconbtn', title: '접기', text: '—' });
-      const head = el(d, 'div', { class: 'head' }, [title, badge, collapseBtn]);
-
-      // 1존: PIP 켜기 + 자동
-      const pipDot = el(d, 'span', { class: 'dot' });
-      const pipLabel = el(d, 'span', { text: 'PIP 켜기' });
-      const pipBtn = el(d, 'button', { class: 'pipbtn' }, [pipDot, el(d, 'span', { text: '📺' }), pipLabel]);
-      const autoSw = el(d, 'div', { class: 'sw' + (cfg.autoPip ? ' on' : '') });
-      const autoRow = el(d, 'div', { class: 'toggle' }, [el(d, 'span', { class: 'lbl', text: '🤖 자동 PIP (스크롤=미니 · 탭전환=PIP)' }), autoSw]);
-
-      // 2존: 프리셋
-      const presetGrid = el(d, 'div', { class: 'grid' });
-      const presetBtns = {};
-      PRESET_KEYS.forEach((k) => {
-        const p = PRESETS[k];
-        const spec = `${p.size.w}×${p.size.h} · ${p.rate}x` + (k === 'night' ? ' · 야간보정' : '');
-        const b = el(d, 'button', { class: 'pbtn' + (cfg.activePreset === k ? ' active' : ''), title: p.label + ' — ' + spec, 'aria-label': p.label + ' ' + spec, text: p.label });
-        presetBtns[k] = b; presetGrid.appendChild(b);
-      });
-
-      // 멀티 영상 셀렉터(조건부)
-      const vselWrap = el(d, 'div', { class: 'vsel' });
-      const vselSec = el(d, 'div', {}, [el(d, 'div', { class: 'seclabel', text: '대상 영상' }), vselWrap]);
-      vselSec.style.display = 'none';
-
-      // 3존: 고급 설정
-      const advanced = buildAdvanced(d, cfg);
-
-      panel = el(d, 'div', { class: 'panel' + (cfg.collapsed ? ' hidden' : '') }, [
-        head, pipBtn, autoRow,
-        el(d, 'div', { class: 'seclabel', text: '상황별 프리셋' }), presetGrid,
-        vselSec, advanced.root,
-      ]);
-
-      // 접힌 핀
-      const pdot = el(d, 'span', { class: 'pdot' });
-      pill = el(d, 'div', { class: 'pill' + (cfg.collapsed ? ' show' : '') }, [pdot, el(d, 'span', { text: '🎬 PIP' })]);
-
-      wrap = el(d, 'div', { class: 'wrap' }, [panel, pill]);
-      shadow.appendChild(wrap);
-
-      els = { pipBtn, pipLabel, pipDot, autoSw, presetBtns, pill, pdot, head, vselWrap, vselSec, advanced };
-
-      bindEvents();
-      placePanel();
-      bindGlobalsOnce();
-      armIdle();
-      maybeOnboard();
-      refreshState(PipController.isActive());
-    }
-
-    function buildAdvanced(d, cfg) {
-      const f = cfg.filters;
-      const liveVideo = () => PipController.getVideo() || MiniPlayer.getVideo();
-      const apply = () => FilterEngine.apply(liveVideo(), ConfigManager.get());
-      const setSub = (patch) => { ConfigManager.set({ subtitles: Object.assign({}, ConfigManager.get().subtitles, patch) }); SubtitleEngine.restyle(ConfigManager.get()); };
-
-      // 재생
-      const rateCtl = slider(d, '배속', MIN_RATE, MAX_RATE, 0.05, cfg.defaultRate, (v) => v.toFixed(2) + 'x', (v) => {
-        ConfigManager.set({ defaultRate: v }); const vid = liveVideo(); if (vid) vid.playbackRate = v;
-      });
-      const grpPlay = group(d, '🔄 재생', [rateCtl.root]);
-
-      // 화면
-      const zoomCtl = slider(d, '줌', 1, 3, 0.05, cfg.zoom, (v) => v.toFixed(2) + 'x', (v) => { ConfigManager.set({ zoom: v }); apply(); });
-      const dimCtl = slider(d, '디밍', 50, 100, 1, cfg.dim, (v) => v + '%', (v) => { ConfigManager.set({ dim: v }); apply(); });
-      const rotBtns = btnRow(d, ['0°', '90°', '180°', '270°'], [0, 90, 180, 270], cfg.rotate, (v) => { ConfigManager.set({ rotate: v }); apply(); });
-      const fitBtns = btnRow(d, ['맞춤', '채움'], ['contain', 'cover'], cfg.fit, (v) => { ConfigManager.set({ fit: v }); apply(); });
-      const screenReset = el(d, 'button', { class: 'resetb', text: '↺ 화면 초기화' });
-      screenReset.addEventListener('click', () => { ConfigManager.set({ zoom: 1, rotate: 0, mirror: false, fit: 'contain', dim: 100 }); zoomCtl.set(1); dimCtl.set(100); rotBtns.set(0); fitBtns.set('contain'); apply(); });
-      const grpScreen = group(d, '🖼️ 화면', [zoomCtl.root, dimCtl.root, el(d, 'div', { class: 'ctl' }, [el(d, 'span', { class: 'cl', text: '회전' }), rotBtns.root]), el(d, 'div', { class: 'ctl' }, [el(d, 'span', { class: 'cl', text: '채움' }), fitBtns.root]), screenReset]);
-
-      // 필터
-      const briCtl = slider(d, '밝기', 50, 150, 1, f.brightness, (v) => v + '%', (v) => { ConfigManager.setFilters({ brightness: v }); apply(); });
-      const conCtl = slider(d, '대비', 50, 150, 1, f.contrast, (v) => v + '%', (v) => { ConfigManager.setFilters({ contrast: v }); apply(); });
-      const satCtl = slider(d, '채도', 0, 200, 1, f.saturate, (v) => v + '%', (v) => { ConfigManager.setFilters({ saturate: v }); apply(); });
-      const nightBtn = el(d, 'button', { class: 'minibtn', text: '🌙 야간 보정' });
-      nightBtn.addEventListener('click', () => { ConfigManager.setFilters({ brightness: 115, contrast: 110, saturate: 100 }); briCtl.set(115); conCtl.set(110); satCtl.set(100); apply(); });
-      const filterReset = el(d, 'button', { class: 'resetb', text: '↺ 필터 초기화' });
-      filterReset.addEventListener('click', () => { ConfigManager.setFilters({ brightness: 100, contrast: 100, saturate: 100 }); briCtl.set(100); conCtl.set(100); satCtl.set(100); apply(); });
-      const grpFilter = group(d, '🎨 필터', [briCtl.root, conCtl.root, satCtl.root, el(d, 'div', { class: 'btnrow' }, [nightBtn]), filterReset]);
-
-      // 자막 따라오기
-      const s = cfg.subtitles;
-      const subOnBtns = btnRow(d, ['표시', '숨김'], [true, false], s.enabled, (v) => setSub({ enabled: v }));
-      const subSizeCtl = slider(d, '크기', 50, 200, 5, s.size, (v) => v + '%', (v) => setSub({ size: v }));
-      const subPosBtns = btnRow(d, ['하단', '상단'], ['bottom', 'top'], s.position, (v) => setSub({ position: v }));
-      const subBgCtl = slider(d, '배경', 0, 100, 5, s.bg, (v) => v + '%', (v) => setSub({ bg: v }));
-      const grpSub = group(d, '💬 자막', [
-        el(d, 'div', { class: 'ctl' }, [el(d, 'span', { class: 'cl', text: '표시' }), subOnBtns.root]),
-        subSizeCtl.root,
-        el(d, 'div', { class: 'ctl' }, [el(d, 'span', { class: 'cl', text: '위치' }), subPosBtns.root]),
-        subBgCtl.root,
-        el(d, 'div', { class: 'note', text: '※ 사이트 자막(유튜브 CC 등)을 켜두면 PIP 창으로 따라옵니다.' }),
-      ]);
-
-      // 슬립 타이머
-      const sleepBtns = btnRow(d, ['끄기', '15분', '30분', '60분', '영상끝'], ['off', '15', '30', '60', 'end'], SleepTimer.mode, (v) => SleepTimer.set(v));
-      const grpSleep = group(d, '💤 슬립 타이머', [sleepBtns.root, el(d, 'div', { class: 'note', text: '※ PIP가 켜져 있어야 동작합니다.' })]);
-
-      // 단축키(읽기 전용) — innerHTML 대신 DOM 구성(유튜브 Trusted Types 대응)
-      const keyData = [
-        ['Alt+P', 'PIP 켜기/끄기'], ['Space / K', '재생·일시정지'], ['← / →', '5초 이동'],
-        ['J / L', '10초 이동'], ['↑ / ↓', '볼륨'], ['M', '음소거'], ['[ / ] / =', '배속 −/＋ · 리셋'],
-        ['R / F / S', '회전 · 크기 · 스크린샷'], ['Esc', '닫기'],
-      ];
-      const keys = el(d, 'div', { class: 'keys' });
-      keyData.forEach(([k, desc]) => keys.appendChild(
-        el(d, 'div', {}, [el(d, 'b', { text: k }), el(d, 'span', { text: ' ' + desc })])));
-      const grpKeys = group(d, '⌨️ 단축키', [keys,
-        el(d, 'div', { class: 'note', text: '※ 재생 단축키는 PIP 창 안 또는 미니플레이어 활성 중에 동작해요. PIP 창이 떠 있어도 원본 페이지의 사이트 단축키는 그대로 살아 있습니다.' })]);
-
-      // 전체 초기화(이 사이트)
-      const allReset = el(d, 'button', { class: 'resetb', text: '↺ 모든 설정 초기화 (이 사이트)' });
-      allReset.addEventListener('click', () => {
-        ConfigManager.reset();
-        const v = PipController.getVideo();
-        if (v) { v.playbackRate = ConfigManager.get().defaultRate; FilterEngine.apply(v, ConfigManager.get()); }
-        SubtitleEngine.restyle(ConfigManager.get());
-        if (host) host.remove();
-        build();
-      });
-
-      const root = el(d, 'details', {}, [el(d, 'summary', { text: '⚙️ 고급 설정' }), grpPlay, grpScreen, grpFilter, grpSub, grpSleep, grpKeys, allReset]);
-      return { root, set(c) {
-        rateCtl.set(c.defaultRate); zoomCtl.set(c.zoom); dimCtl.set(c.dim); rotBtns.set(c.rotate); fitBtns.set(c.fit);
-        briCtl.set(c.filters.brightness); conCtl.set(c.filters.contrast); satCtl.set(c.filters.saturate);
-        subOnBtns.set(c.subtitles.enabled); subSizeCtl.set(c.subtitles.size); subPosBtns.set(c.subtitles.position); subBgCtl.set(c.subtitles.bg);
-      } };
-    }
-
-    // 그룹은 접힌 상태로 시작 — 전부 펼치면 패널이 화면(1080p 기준)을 넘어감
-    function group(d, label, children) {
-      return el(d, 'details', { class: 'grp' }, [el(d, 'summary', { text: label }), ...children.map((c) => c)]);
-    }
-    function slider(d, label, min, max, step, val, fmt, onInput) {
-      const cl = el(d, 'span', { class: 'cl', text: label });
-      const input = el(d, 'input', { type: 'range', min: String(min), max: String(max), step: String(step), value: String(val) });
-      const cv = el(d, 'span', { class: 'cv', text: fmt(val) });
-      input.addEventListener('input', () => { const v = parseFloat(input.value); cv.textContent = fmt(v); onInput(v); });
-      const root = el(d, 'div', { class: 'ctl' }, [cl, input, cv]);
-      return { root, set(v) { input.value = String(v); cv.textContent = fmt(v); } };
-    }
-    function btnRow(d, labels, values, active, onPick) {
-      const btns = [];
-      const root = el(d, 'div', { class: 'btnrow' });
-      labels.forEach((lab, i) => {
-        const b = el(d, 'button', { class: 'minibtn' + (values[i] === active ? ' active' : ''), text: lab });
-        b.addEventListener('click', () => { btns.forEach((x) => x.classList.remove('active')); b.classList.add('active'); onPick(values[i]); });
-        btns.push(b); root.appendChild(b);
-      });
-      return { root, set(v) { btns.forEach((b, i) => b.classList.toggle('active', values[i] === v)); } };
-    }
-
-    function bindEvents() {
-      els.pipBtn.addEventListener('click', () => PipController.toggle());
-      els.autoSw.addEventListener('click', () => {
-        const next = !ConfigManager.get().autoPip;
-        ConfigManager.set({ autoPip: next });
-        els.autoSw.classList.toggle('on', next);
-        if (next) {
-          const v = VideoObserver.pickActive();
-          Toast.show(v && !v.paused
-            ? '🤖 자동 PIP 켜짐 — 스크롤로 영상이 사라지면 미니플레이어로 따라가고, 탭을 바꾸면 PIP로 떠요.'
-            : '🤖 자동 PIP 켜짐 — 영상을 재생하면 스크롤 시 미니플레이어가 따라갑니다.');
-        } else {
-          MiniPlayer.exit();
-        }
-      });
-      PRESET_KEYS.forEach((k) => els.presetBtns[k].addEventListener('click', () => applyPreset(k)));
-      els.head.querySelector('.iconbtn').addEventListener('click', () => setCollapsed(true));
-      els.pill.addEventListener('click', () => {
-        // 전체화면 pill 전용 상태에선 이번 전체화면 동안만 패널을 다시 연다(설정은 안 건드림)
-        if (wrap.classList.contains('fs-hide')) { wrap.classList.remove('fs-hide'); return; }
-        setCollapsed(false);
-      });
-      makeDraggable(els.head, wrap);
-    }
-
-    function applyPreset(key) {
-      const p = PRESETS[key];
-      ConfigManager.set({ activePreset: key, defaultRate: p.rate, zoom: p.zoom, rotate: p.rotate, fit: p.fit, pipSize: { w: p.size.w, h: p.size.h } });
-      ConfigManager.setFilters(p.filters);
-      PRESET_KEYS.forEach((k) => els.presetBtns[k].classList.toggle('active', k === key));
-      els.advanced.set(ConfigManager.get());
-      const v = PipController.getVideo();
-      if (PipController.isActive()) {
-        if (v) { v.playbackRate = p.rate; FilterEngine.apply(v, ConfigManager.get()); }
-        PipController.tryResize(p.size.w, p.size.h);
-      } else {
-        PipController.enter(); // 클릭 제스처로 진입
+    function place(v) {
+      const c = ensure();
+      const r = v.getBoundingClientRect();
+      const vw = doc.documentElement.clientWidth || innerWidth;
+      c.style.top = `${Math.max(r.top + deps.inset(v), 8)}px`;
+      c.style.right = `${Math.max(vw - r.right + 8, 8)}px`;
+      if (!shown) {
+        shown = true;
+        c.classList.add("show");
       }
     }
-
-    function refreshState(active) {
-      if (!els.pipBtn) return;
-      els.pipBtn.classList.toggle('on', active);
-      els.pipLabel.textContent = active ? 'PIP 끄기' : 'PIP 켜기';
-      els.pill.classList.toggle('on', active);
-      // 멀티 영상 셀렉터 갱신
-      refreshVideoSelector();
+    function hide() {
+      clearTimeout(dwell);
+      target = null;
+      if (shown && chip) chip.classList.remove("show");
+      shown = false;
     }
-
-    function refreshVideoSelector() {
-      if (!els.vselWrap) return;
-      const vids = VideoObserver.list();
-      if (vids.length < 2) { els.vselSec.style.display = 'none'; return; }
-      els.vselSec.style.display = 'block';
-      els.vselWrap.textContent = '';
-      const cur = PipController.getVideo();
-      vids.slice(0, 6).forEach((v, i) => {
-        const b = el(document, 'button', { class: 'vb' + (v === cur ? ' active' : ''), text: '◉ ' + (i + 1) });
-        b.addEventListener('click', () => { VideoObserver.setManual(v); refreshVideoSelector(); });
-        els.vselWrap.appendChild(b);
-      });
+    function update() {
+      raf = 0;
+      if (!deps.tracker.videos().length) return hide();
+      if (!deps.enabled() || deps.busy() || doc.fullscreenElement) return hide();
+      const v = deps.tracker.at(x, y);
+      if (!v) return hide();
+      if (v !== target) {
+        hide();
+        target = v;
+        dwell = setTimeout(() => {
+          if (target === v) place(v);
+        }, DWELL_MS);
+      } else if (shown) {
+        place(v);
+      }
     }
-
-    function setCollapsed(on) {
-      ConfigManager.set({ collapsed: on });
-      panel.classList.toggle('hidden', on);
-      els.pill.classList.toggle('show', on);
-    }
-
-    function makeDraggable(handle, w) {
-      let sx, sy, ox, oy, dragging = false;
-      handle.addEventListener('pointerdown', (e) => {
-        if (e.target.closest('button')) return;
-        dragging = true;
-        const r = w.getBoundingClientRect();
-        sx = e.clientX; sy = e.clientY; ox = r.left; oy = r.top;
-        handle.setPointerCapture(e.pointerId);
-      });
-      handle.addEventListener('pointermove', (e) => {
-        if (!dragging) return;
-        w.style.left = clamp(ox + e.clientX - sx, 0, Math.max(0, innerWidth - w.offsetWidth)) + 'px';
-        w.style.top = clamp(oy + e.clientY - sy, 0, Math.max(0, innerHeight - w.offsetHeight)) + 'px';
-        w.style.right = 'auto';
-        fitPanel();
-      });
-      const end = () => { dragging = false; };
-      handle.addEventListener('pointerup', end);
-      handle.addEventListener('pointercancel', end);
-    }
-
-    // idle 상태는 클릭 통과(pointer-events:none) — 반투명 패널이 사이트 클릭을 몰래 삼키지 않게.
-    // 마우스가 패널 근처(±28px)로 와야 깨어나므로, 깨어난 패널은 항상 또렷하게 보이는 상태.
-    function armIdle() {
-      clearTimeout(idleTimer);
-      if (ConfigManager.get().fadeWhenIdle) idleTimer = setTimeout(() => wrap && wrap.classList.add('idle'), 3500);
-    }
-    function placePanel() {
-      const fs = document.fullscreenElement || document.webkitFullscreenElement;
-      const target = fs || document.body;
-      if (host && host.parentElement !== target) target.appendChild(host);
-      // 전체화면에선 화질 메뉴 자리와 겹치므로 pill만 표시(pill 클릭 시 이번만 패널 열림)
-      if (wrap) wrap.classList.toggle('fs-hide', !!fs);
-      fitPanel();
-    }
-    // 패널이 화면 아래로 잘리지 않게, 현재 위치 기준으로 최대 높이를 재계산(내용은 스크롤)
-    function fitPanel() {
-      if (!panel || !wrap || !wrap.isConnected) return;
-      const top = wrap.getBoundingClientRect().top;
-      panel.style.maxHeight = Math.max(160, innerHeight - top - 16) + 'px';
-    }
-    // 전역 리스너는 최초 1회만 등록 — "모든 설정 초기화"로 build()가 다시 불려도 중복 누적 방지.
-    let globalsBound = false;
-    function bindGlobalsOnce() {
-      if (globalsBound) return;
-      globalsBound = true;
-      const NEAR = 28;
-      const wake = (e) => {
-        if (!wrap) return;
-        const r = wrap.getBoundingClientRect();
-        if (e.clientX < r.left - NEAR || e.clientX > r.right + NEAR ||
-            e.clientY < r.top - NEAR || e.clientY > r.bottom + NEAR) return;
-        wrap.classList.remove('idle');
-        armIdle();
-      };
-      window.addEventListener('pointermove', wake, { passive: true });
-      window.addEventListener('pointerdown', wake, { passive: true });
-      window.addEventListener('resize', fitPanel, { passive: true });
-      document.addEventListener('fullscreenchange', placePanel);
-      document.addEventListener('webkitfullscreenchange', placePanel);
-    }
-
-    function maybeOnboard() {
-      if (ConfigManager.get().onboarded) return;
-      const close = el(document, 'button', { text: '알겠어요' });
-      const tip = el(document, 'div', { class: 'tip' }, [
-        el(document, 'div', { text: '🎬 영상을 항상 위에 뜨는 작은 창으로 빼냅니다. 화질은 원본 그대로! 버튼을 누르거나 Alt+P 한 번이면 끝이에요.' }),
-        close,
-      ]);
-      wrap.appendChild(tip);
-      close.addEventListener('click', () => { tip.remove(); ConfigManager.set({ onboarded: true }); ConfigManager.saveNow(); });
-    }
-
-    return { build, refreshState, refreshVideoSelector };
-  })();
-
-  // ─────────────────────────────────────────────────────────────
-  // 부트스트랩
-  // ─────────────────────────────────────────────────────────────
-  ConfigManager.load();
-  HotkeyManager.attach(document);
-  PipController.setOnStateChange((active) => UIManager.refreshState(active));
-
-  VideoObserver.start((active) => {
-    // 미니플레이어가 잡고 있던 video가 SPA 전환으로 죽었으면 닫기
-    if (MiniPlayer.isActive()) { const mv = MiniPlayer.getVideo(); if (!mv || !mv.isConnected) MiniPlayer.exit(); }
-    AutoPipManager.watch(active);
-    PipController.onActiveVideoChanged(active);
-    UIManager.refreshVideoSelector();
-  });
-  AutoPipManager.start();
-  AutoPipManager.watch(VideoObserver.pickActive());
-
-  let uiBuilt = false;
-  function buildUIOnce() {
-    if (uiBuilt) return;
-    if (!document.body) { document.addEventListener('DOMContentLoaded', buildUIOnce, { once: true }); return; }
-    uiBuilt = true;
-    try { UIManager.build(); console.log('[PIP] UI 표시 완료 · Document PiP:', SUPPORTS_DOC_PIP); }
-    catch (e) { uiBuilt = false; console.error('[PIP] UI 생성 실패:', e); }
+    doc.addEventListener("pointermove", (e) => {
+      if (e.pointerType === "touch") return;
+      x = e.clientX;
+      y = e.clientY;
+      if (!raf) raf = requestAnimationFrame(update);
+    }, { capture: true, passive: true });
+    const quietHide = () => {
+      if (target) hide();
+    };
+    window.addEventListener("scroll", quietHide, { capture: true, passive: true });
+    window.addEventListener("resize", quietHide, { passive: true });
+    window.addEventListener("blur", quietHide);
+    doc.addEventListener("fullscreenchange", quietHide);
+    doc.addEventListener("mouseout", (e) => {
+      if (!e.relatedTarget) quietHide();
+    });
   }
 
-  console.log('[PIP] 스크립트 시작 · URL:', location.href);
-  buildUIOnce();
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', buildUIOnce, { once: true });
-  window.addEventListener('load', buildUIOnce, { once: true });
+  // src/styles/player.css
+  var player_default = "/* PiP 창 안 플레이어. 이 스타일시트는 PiP 창 문서에만 있으므로, 영상이 돌아가면 효과도 저절로 사라진다. */\n:root {\n  color-scheme: dark;\n  --fg: #f1f4f8;\n  --dim: #b4bdc9;\n  --accent: #4f9dff;\n  --panel: rgba(20, 24, 32, 0.96);\n  font: 13px/1.3 system-ui, -apple-system, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;\n}\n* { box-sizing: border-box; margin: 0; padding: 0; }\nhtml, body { height: 100%; overflow: hidden; background: #000; color: var(--fg); }\nbutton { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex: none; }\nbutton:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }\nsvg { display: block; }\n[hidden] { display: none !important; }\n\n.stage { position: fixed; inset: 0; container: stage / inline-size; user-select: none; -webkit-user-select: none; }\n\n/* 영상: 사이트가 넣은 인라인 크기·위치를 덮어쓰기만 하고 지우지는 않는다(Zero-touch) */\n.slot { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #000; }\n.slot > video {\n  position: static !important; display: block !important;\n  width: 100% !important; height: 100% !important;\n  min-width: 0 !important; min-height: 0 !important; max-width: none !important; max-height: none !important;\n  margin: 0 !important; inset: auto !important; transform: none !important; filter: none !important;\n  object-fit: contain !important; opacity: 1 !important; visibility: visible !important;\n}\n/* controls 속성이 있는 영상의 브라우저 기본 컨트롤 숨김(Chromium). 별도 규칙이라 다른 브라우저에서 무시돼도 위 규칙은 유지 */\n.slot > video::-webkit-media-controls { display: none !important; }\n\n/* 오버레이: 항상 클릭을 받고(빈 곳 클릭 = 재생/일시정지), 숨김 상태에선 내용만 감춘다 */\n.ov { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: space-between; }\n.ov.idle { cursor: none; }\n.top, .mid, .bot { transition: opacity .14s ease, visibility 0s; }\n.ov.idle .top, .ov.idle .mid, .ov.idle .bot { opacity: 0; visibility: hidden; transition: opacity .32s ease, visibility 0s linear .32s; }\n\n.top { position: relative; z-index: 1; display: flex; align-items: center; gap: 2px; padding: 6px 6px 20px 12px; background: linear-gradient(rgba(0, 0, 0, .7), transparent); }\n.ttl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 600; text-shadow: 0 1px 2px rgba(0, 0, 0, .6); }\n\n.mid { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 28px; pointer-events: none; }\n.mid > button { pointer-events: auto; }\n\n.bot { position: relative; z-index: 1; padding: 22px 10px 4px; background: linear-gradient(transparent, rgba(0, 0, 0, .75)); }\n\n.ib { width: 32px; height: 32px; border-radius: 8px; }\n.ib:hover { background: rgba(255, 255, 255, .14); }\n.ib svg { width: 20px; height: 20px; }\n.cb { width: 44px; height: 44px; border-radius: 50%; background: rgba(0, 0, 0, .45); }\n.cb svg { width: 26px; height: 26px; }\n.cb.big { width: 60px; height: 60px; }\n.cb.big svg { width: 34px; height: 34px; }\n.cb:hover { background: rgba(79, 157, 255, .9); }\n\n/* 시크바 */\n.seek { position: relative; height: 18px; display: flex; align-items: center; cursor: pointer; touch-action: none; }\n.track { position: relative; width: 100%; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, .25); transition: height .1s; }\n.seek:hover .track, .seek.drag .track { height: 6px; }\n.buf, .played { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: inherit; }\n.buf { background: rgba(255, 255, 255, .35); }\n.played { background: var(--accent); }\n.thumb { position: absolute; top: 50%; left: 0; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: var(--accent); transform: scale(0); transition: transform .1s; }\n.seek:hover .thumb, .seek.drag .thumb { transform: scale(1); }\n.tip { position: absolute; bottom: 20px; left: 0; transform: translateX(-50%); padding: 2px 6px; border-radius: 6px; background: var(--panel); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; display: none; }\n.seek:hover .tip, .seek.drag .tip { display: block; }\n.seek.live .track { cursor: pointer; }\n\n.row { display: flex; align-items: center; gap: 2px; height: 34px; }\n.time { padding: 0 6px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--dim); white-space: nowrap; }\n.live { height: 20px; padding: 0 7px; margin: 0 6px; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: .3px; background: rgba(255, 255, 255, .16); }\n.live.edge { background: #e53935; }\n.grow { flex: 1; }\n.vol { width: 72px; height: 4px; accent-color: var(--accent); cursor: pointer; }\n.rate { min-width: 46px; height: 26px; padding: 0 9px; margin-left: 4px; border-radius: 13px; background: rgba(255, 255, 255, .12); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }\n.rate:hover { background: rgba(255, 255, 255, .2); }\n.rate.on { color: #ffb84f; }\n\n/* ⚙ 팝오버 */\n.pop { position: absolute; z-index: 2; top: 42px; right: 8px; width: 264px; max-width: calc(100% - 16px); max-height: calc(100% - 52px); overflow: auto; padding: 6px; border-radius: 12px; background: var(--panel); border: 1px solid rgba(255, 255, 255, .1); box-shadow: 0 8px 24px rgba(0, 0, 0, .5); }\n.pop[hidden] { display: none; }\n.opt { display: flex; width: 100%; align-items: center; gap: 10px; padding: 9px 8px; border-radius: 8px; text-align: left; font-size: 12.5px; }\n.opt:hover { background: rgba(255, 255, 255, .08); }\n.opt .lbl { flex: 1; }\n.opt .sub { display: block; margin-top: 2px; font-size: 11px; color: var(--dim); }\n.sw { position: relative; flex: none; width: 32px; height: 18px; border-radius: 9px; background: rgba(255, 255, 255, .25); transition: background .15s; }\n.sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform .15s; }\n.opt[aria-checked='true'] .sw { background: var(--accent); }\n.opt[aria-checked='true'] .sw::after { transform: translateX(14px); }\n.ver { padding: 6px 8px 3px; font-size: 11px; color: var(--dim); }\n\n/* 첫 진입 힌트 */\n.hint { position: absolute; z-index: 3; left: 50%; top: 48px; transform: translateX(-50%); max-width: calc(100% - 24px); padding: 8px 12px; border-radius: 10px; background: rgba(79, 157, 255, .95); color: #fff; font-size: 12px; text-align: center; pointer-events: none; transition: opacity .4s; }\n.hint.out { opacity: 0; }\n\n/* 좁은 창: 중앙은 재생 버튼만, 하단은 재생 · 시간 · 배속 */\n@container stage (max-width: 359px) {\n  .mid .side, .mute, .vol { display: none; }\n  .ttl { font-size: 12px; }\n}\n/* 낮은 창: 중앙 버튼 생략 */\n@media (max-height: 200px) {\n  .mid { display: none; }\n  .top { padding-bottom: 8px; }\n  .bot { padding-top: 8px; }\n}\n@media (prefers-reduced-motion: reduce) {\n  *, *::after { transition: none !important; }\n}\n";
+
+  // src/player-ui.ts
+  var HIDE_MS = 2400;
+  function mountPlayerUI(win, first, deps) {
+    const doc = win.document;
+    doc.documentElement.lang = "ko";
+    doc.title = deps.title;
+    adoptCss(doc, player_default);
+    let video = first;
+    const btn = (cls, id, name) => {
+      const label = deps.hint(id);
+      return h(doc, "button", { class: cls, type: "button", title: label, "aria-label": label, onclick: () => deps.run(id) }, icon(doc, name));
+    };
+    const slot = h(doc, "div", { class: "slot" });
+    const ttl = h(doc, "div", { class: "ttl", text: deps.title });
+    const gear = h(doc, "button", { class: "ib", type: "button", title: "설정", "aria-label": "설정", "aria-expanded": "false" }, icon(doc, "tune"));
+    const closeB = btn("ib", "close", "close");
+    const top = h(doc, "div", { class: "top" }, ttl, gear, closeB);
+    const playC = btn("cb big", "play", "pause");
+    const mid = h(doc, "div", { class: "mid" }, btn("cb side", "back10", "back10"), playC, btn("cb side", "fwd10", "fwd10"));
+    const buf = h(doc, "div", { class: "buf" });
+    const played = h(doc, "div", { class: "played" });
+    const thumb = h(doc, "div", { class: "thumb" });
+    const track = h(doc, "div", { class: "track" }, buf, played, thumb);
+    const tip = h(doc, "div", { class: "tip" });
+    const seek = h(doc, "div", { class: "seek", role: "slider", "aria-label": "재생 위치", tabindex: "-1" }, track, tip);
+    const playB = btn("ib", "play", "pause");
+    const time = h(doc, "span", { class: "time" });
+    const live = h(doc, "button", { class: "live", type: "button", title: "실시간으로", text: "LIVE", onclick: () => toLiveEdge(video) });
+    const muteB = btn("ib mute", "mute", "volume");
+    const vol = h(doc, "input", { class: "vol", type: "range", min: "0", max: "100", step: "1", "aria-label": "볼륨" });
+    const rate = h(doc, "button", { class: "rate", type: "button", title: "배속 (클릭: 바꾸기 · [ / ] / =)", "aria-label": "배속", onclick: () => deps.run("rateCycle") });
+    const row = h(doc, "div", { class: "row" }, playB, time, live, h(doc, "span", { class: "grow" }), muteB, vol, rate);
+    const bot = h(doc, "div", { class: "bot" }, seek, row);
+    const ov = h(doc, "div", { class: "ov" }, top, mid, bot);
+    const pop = buildPopover(doc, deps.config);
+    const stage = h(doc, "div", { class: "stage" }, slot, ov, pop.root);
+    doc.body.append(stage);
+    let visible = true;
+    let dragging = false;
+    const setIcon = (b, name) => b.replaceChildren(icon(doc, name));
+    function renderProgress() {
+      const isLive2 = isLive(video);
+      const r = seekRange(video);
+      time.hidden = isLive2;
+      live.hidden = !isLive2;
+      seek.classList.toggle("live", isLive2);
+      if (isLive2) {
+        live.classList.toggle("edge", !r || r.end - video.currentTime < 15);
+      } else {
+        time.textContent = `${fmtTime(video.currentTime)} / ${fmtTime(video.duration)}`;
+      }
+      const span = r ? r.end - r.start : 0;
+      const p = span > 0 ? clamp((video.currentTime - r.start) / span, 0, 1) : isLive2 ? 1 : 0;
+      played.style.width = `${p * 100}%`;
+      thumb.style.left = `${p * 100}%`;
+      const b = video.buffered;
+      buf.style.width = span > 0 && b.length ? `${clamp((b.end(b.length - 1) - r.start) / span, 0, 1) * 100}%` : "0";
+      seek.setAttribute("aria-valuetext", isLive2 ? "실시간" : time.textContent ?? "");
+    }
+    function renderPlay() {
+      const paused = video.paused || video.ended;
+      const name = paused ? "play" : "pause";
+      setIcon(playC, name);
+      setIcon(playB, name);
+      if (paused) show();
+      else armHide();
+    }
+    function renderVolume() {
+      const off = video.muted || video.volume === 0;
+      setIcon(muteB, off ? "muted" : "volume");
+      vol.value = String(Math.round((video.muted ? 0 : video.volume) * 100));
+      vol.setAttribute("aria-valuetext", `${vol.value}%`);
+    }
+    function renderRate() {
+      const r = video.playbackRate;
+      rate.textContent = `${Number(r.toFixed(2))}x`;
+      rate.classList.toggle("on", r !== 1);
+    }
+    const renderAll = () => {
+      renderProgress();
+      renderPlay();
+      renderVolume();
+      renderRate();
+    };
+    let unbind = () => {
+    };
+    function bind(v) {
+      unbind();
+      const on = [
+        ["play", renderPlay],
+        ["pause", renderPlay],
+        ["ended", renderPlay],
+        ["timeupdate", () => visible && !dragging && renderProgress()],
+        // 숨김 상태에선 DOM 쓰기 0
+        ["progress", () => visible && renderProgress()],
+        ["durationchange", renderProgress],
+        ["loadedmetadata", renderProgress],
+        ["emptied", renderProgress],
+        ["volumechange", renderVolume],
+        ["ratechange", renderRate]
+      ];
+      on.forEach(([t, fn]) => v.addEventListener(t, fn));
+      unbind = () => on.forEach(([t, fn]) => v.removeEventListener(t, fn));
+      video = v;
+      renderAll();
+    }
+    let hideTimer = 0;
+    function show() {
+      if (!visible) {
+        visible = true;
+        ov.classList.remove("idle");
+        renderProgress();
+      }
+      armHide();
+    }
+    function armHide() {
+      win.clearTimeout(hideTimer);
+      hideTimer = win.setTimeout(() => {
+        const keyboard = doc.activeElement?.matches(":focus-visible") && doc.activeElement !== doc.body;
+        if (video.paused || dragging || pop.isOpen() || keyboard) return;
+        visible = false;
+        ov.classList.add("idle");
+      }, HIDE_MS);
+    }
+    stage.addEventListener("pointermove", show);
+    stage.addEventListener("pointerdown", show);
+    doc.addEventListener("focusin", show);
+    doc.addEventListener("mouseout", (e) => {
+      if (e.relatedTarget || video.paused || dragging || pop.isOpen()) return;
+      win.clearTimeout(hideTimer);
+      visible = false;
+      ov.classList.add("idle");
+    });
+    ov.addEventListener("click", (e) => {
+      if (e.target !== ov && e.target !== mid) return;
+      if (pop.isOpen()) closePop();
+      else deps.run("play");
+    });
+    stage.addEventListener("wheel", (e) => {
+      if (pop.root.contains(e.target)) return;
+      const d = e.deltaY || e.deltaX;
+      if (!d) return;
+      e.preventDefault();
+      if (e.shiftKey) nudgeRate(video, d < 0 ? 0.25 : -0.25);
+      else changeVolume(video, d < 0 ? 0.05 : -0.05);
+      show();
+    }, { passive: false });
+    vol.addEventListener("input", () => {
+      video.volume = Number(vol.value) / 100;
+      video.muted = video.volume === 0;
+    });
+    const ratioAt = (x) => {
+      const r = track.getBoundingClientRect();
+      return r.width > 0 ? clamp((x - r.left) / r.width, 0, 1) : 0;
+    };
+    const showTip = (x) => {
+      const ratio = ratioAt(x);
+      const r = seekRange(video);
+      tip.style.left = `${ratio * 100}%`;
+      if (!r) {
+        tip.textContent = "";
+        return;
+      }
+      const t = r.start + ratio * (r.end - r.start);
+      tip.textContent = isLive(video) ? `-${fmtTime(r.end - t)}` : fmtTime(t);
+    };
+    seek.addEventListener("pointerdown", (e) => {
+      dragging = true;
+      seek.classList.add("drag");
+      try {
+        seek.setPointerCapture(e.pointerId);
+      } catch {
+      }
+      seekToRatio(video, ratioAt(e.clientX));
+      showTip(e.clientX);
+      renderProgress();
+    });
+    seek.addEventListener("pointermove", (e) => {
+      showTip(e.clientX);
+      if (dragging) {
+        seekToRatio(video, ratioAt(e.clientX));
+        renderProgress();
+      }
+    });
+    const endDrag = () => {
+      if (!dragging) return;
+      dragging = false;
+      seek.classList.remove("drag");
+      armHide();
+    };
+    seek.addEventListener("pointerup", endDrag);
+    seek.addEventListener("pointercancel", endDrag);
+    seek.addEventListener("lostpointercapture", endDrag);
+    function closePop() {
+      pop.close();
+      gear.setAttribute("aria-expanded", "false");
+    }
+    gear.addEventListener("click", () => {
+      pop.toggle();
+      gear.setAttribute("aria-expanded", String(pop.isOpen()));
+      show();
+    });
+    doc.addEventListener("keydown", (e) => {
+      show();
+      if (e.code === "Escape" && pop.isOpen()) {
+        e.preventDefault();
+        closePop();
+        return;
+      }
+      deps.onKey(e);
+    }, true);
+    if (!deps.config.get().hinted) {
+      const hint = h(doc, "div", { class: "hint", text: "마우스를 올리면 컨트롤 · 휠 = 볼륨 · Shift+휠 = 배속" });
+      stage.append(hint);
+      win.setTimeout(() => hint.classList.add("out"), 3600);
+      win.setTimeout(() => hint.remove(), 4100);
+      deps.config.set({ hinted: true });
+    }
+    bind(first);
+    show();
+    return {
+      slot,
+      setVideo: bind,
+      setTitle(t) {
+        ttl.textContent = t;
+        doc.title = t;
+      },
+      destroy() {
+        unbind();
+        pop.destroy();
+        win.clearTimeout(hideTimer);
+      }
+    };
+  }
+  function buildPopover(doc, config) {
+    const opts = [];
+    const option = (label, sub, get, set) => {
+      const el = h(
+        doc,
+        "button",
+        { class: "opt", type: "button", role: "switch" },
+        h(doc, "span", { class: "lbl" }, label, h(doc, "span", { class: "sub", text: sub })),
+        h(doc, "span", { class: "sw", "aria-hidden": "true" })
+      );
+      el.addEventListener("click", () => set(!get()));
+      opts.push({ el, get });
+      return el;
+    };
+    const root2 = h(
+      doc,
+      "div",
+      { class: "pop", role: "dialog", "aria-label": "설정", hidden: true },
+      option(
+        "탭 전환 시 자동 PIP",
+        "Chrome 134+ · 소리 나는 영상을 재생 중일 때",
+        () => config.get().autoTabPip,
+        (on) => config.set({ autoTabPip: on })
+      ),
+      option(
+        "영상 위 ⧉ 버튼 표시",
+        "꺼도 Alt+P로 열 수 있어요",
+        () => config.get().launcher,
+        (on) => config.set({ launcher: on })
+      ),
+      option(
+        "이 사이트에서는 버튼·자동 PIP 끄기",
+        location.hostname,
+        () => config.siteDisabled(),
+        (off) => config.setSiteDisabled(off)
+      ),
+      h(doc, "div", { class: "ver", text: `v${"2.0.0"} · Alt+P로 언제든 켜고 끌 수 있어요` })
+    );
+    const sync = () => opts.forEach((o) => o.el.setAttribute("aria-checked", String(o.get())));
+    sync();
+    const unsub = config.subscribe(sync);
+    return {
+      root: root2,
+      isOpen: () => !root2.hidden,
+      toggle() {
+        root2.hidden = !root2.hidden;
+      },
+      close() {
+        root2.hidden = true;
+      },
+      destroy: unsub
+    };
+  }
+
+  // src/dock.ts
+  var IN_FLOW = /* @__PURE__ */ new Set(["static", "relative", "sticky"]);
+  function detach(video) {
+    const parent = video.parentNode;
+    if (!parent) throw new Error("영상이 문서에 붙어 있지 않습니다");
+    const doc = video.ownerDocument;
+    const anchor = doc.createComment("video-pip");
+    parent.insertBefore(anchor, video);
+    let spacer = null;
+    const cs = doc.defaultView?.getComputedStyle(video);
+    const rect = video.getBoundingClientRect();
+    if (cs && IN_FLOW.has(cs.position || "static") && cs.display !== "none" && rect.width > 0 && rect.height > 0) {
+      spacer = doc.createElement("div");
+      spacer.setAttribute("data-video-pip-spacer", "");
+      const s = spacer.style;
+      s.display = cs.display.startsWith("inline") ? "inline-block" : "block";
+      s.boxSizing = "border-box";
+      s.width = `${rect.width}px`;
+      s.height = `${rect.height}px`;
+      s.margin = `${cs.marginTop} ${cs.marginRight} ${cs.marginBottom} ${cs.marginLeft}`;
+      s.verticalAlign = cs.verticalAlign;
+      s.flex = "none";
+      s.background = "#000";
+      parent.insertBefore(spacer, video);
+    }
+    return { video, anchor, spacer, parent, done: false };
+  }
+  function moveTo(token, slot) {
+    slot.append(token.video);
+  }
+  function restore(token) {
+    if (token.done) return;
+    token.done = true;
+    const { video, anchor, spacer, parent } = token;
+    const wasPlaying = !video.paused && !video.ended;
+    if (anchor.parentNode) anchor.parentNode.insertBefore(video, anchor);
+    else if (parent.isConnected) parent.appendChild(video);
+    else video.remove();
+    anchor.remove();
+    spacer?.remove();
+    if (wasPlaying && video.isConnected) {
+      setTimeout(() => {
+        if (video.paused && !video.ended) video.play()?.catch(() => {
+        });
+      }, 200);
+    }
+  }
+
+  // src/session.ts
+  var MSG = {
+    noVideo: "영상을 찾지 못했어요. 영상을 재생한 뒤 다시 시도해 주세요.",
+    unsupported: "이 브라우저나 영상은 PIP를 지원하지 않아요.",
+    retry: "PIP를 열지 못했어요. 영상을 클릭하거나 Alt+P를 다시 눌러 주세요."
+  };
+  function createSession(deps) {
+    let seq = 0;
+    let active = null;
+    let opening = false;
+    let queue = Promise.resolve();
+    let pendingOpen = null;
+    const subs = /* @__PURE__ */ new Set();
+    const mode = () => opening ? "opening" : active ? active.kind : "idle";
+    const emit = () => {
+      const m = mode();
+      subs.forEach((fn) => {
+        try {
+          fn(m);
+        } catch (e) {
+          warn(e);
+        }
+      });
+    };
+    const enqueue = (fn) => queue = queue.then(fn).catch((e) => warn("전환 실패", e));
+    function teardown(id) {
+      const a = active;
+      if (!a || a.id !== id) return;
+      active = null;
+      for (const fn of a.cleanup) {
+        try {
+          fn();
+        } catch (e) {
+          warn(e);
+        }
+      }
+      try {
+        a.ui?.destroy();
+      } catch (e) {
+        warn(e);
+      }
+      if (a.token) {
+        restore(a.token);
+        window.dispatchEvent(new Event("resize"));
+      }
+      emit();
+    }
+    function closeActive() {
+      const a = active;
+      if (!a) return;
+      teardown(a.id);
+      if (a.kind === "doc") {
+        try {
+          a.win?.close();
+        } catch {
+        }
+      } else deps.exitLegacy();
+    }
+    async function openDoc(video, reason) {
+      let win;
+      try {
+        win = await deps.requestWindow(video);
+      } catch (e) {
+        warn("Document PiP 실패", e);
+        if (reason === "auto" && deps.legacyAvailable(video)) return openLegacy(video);
+        deps.toast(MSG.retry);
+        return;
+      }
+      const a = { id: ++seq, kind: "doc", video, win, cleanup: [] };
+      try {
+        a.ui = deps.mountUI(win, video);
+        a.token = detach(video);
+        moveTo(a.token, a.ui.slot);
+        active = a;
+        const id = a.id;
+        win.addEventListener("pagehide", () => teardown(id), { once: true });
+      } catch (e) {
+        if (a.token) restore(a.token);
+        try {
+          a.ui?.destroy();
+        } catch {
+        }
+        try {
+          win.close();
+        } catch {
+        }
+        throw e;
+      }
+    }
+    async function openLegacy(video) {
+      if (!deps.legacyAvailable(video)) {
+        deps.toast(MSG.unsupported);
+        return;
+      }
+      try {
+        await deps.requestLegacy(video);
+      } catch (e) {
+        warn("PiP 실패", e);
+        deps.toast(MSG.retry);
+        return;
+      }
+      const a = { id: ++seq, kind: "legacy", video, cleanup: [] };
+      const id = a.id;
+      const onLeave = () => teardown(id);
+      video.addEventListener("leavepictureinpicture", onLeave, { once: true });
+      a.cleanup.push(() => video.removeEventListener("leavepictureinpicture", onLeave));
+      active = a;
+    }
+    async function openNow(video, reason) {
+      const v = video ?? deps.pick();
+      if (!v) {
+        if (reason === "manual") deps.toast(MSG.noVideo);
+        return;
+      }
+      if (active) {
+        if (active.video === v) return;
+        closeActive();
+      }
+      opening = true;
+      emit();
+      try {
+        if (deps.docPip() && !v.mediaKeys) await openDoc(v, reason);
+        else await openLegacy(v);
+      } finally {
+        opening = false;
+        emit();
+      }
+    }
+    const session = {
+      mode,
+      video: () => active?.video ?? null,
+      open(video, reason = "manual") {
+        if (pendingOpen) return pendingOpen;
+        const p = enqueue(() => openNow(video, reason)).finally(() => {
+          if (pendingOpen === p) pendingOpen = null;
+        });
+        pendingOpen = p;
+        return p;
+      },
+      close: () => enqueue(closeActive),
+      toggle() {
+        if (pendingOpen) return pendingOpen;
+        return active ? session.close() : session.open();
+      },
+      rebind() {
+        const a = active;
+        if (!a || a.kind !== "doc" || !a.token || !a.ui) return;
+        const cur = a.video;
+        const homeGone = !a.token.anchor.isConnected;
+        const sourceGone = cur.readyState === 0 && !cur.currentSrc && !cur.srcObject;
+        if (!homeGone && !sourceGone) return;
+        const next = deps.pick();
+        if (!next || next === cur) return;
+        restore(a.token);
+        a.token = detach(next);
+        moveTo(a.token, a.ui.slot);
+        a.video = next;
+        a.ui.setVideo(next);
+        a.ui.setTitle(deps.title());
+      },
+      fullscreen(el) {
+        const home = active?.kind === "doc" ? active.token?.anchor.parentNode : null;
+        if (el && home && el.contains(home)) void session.close();
+      },
+      refreshTitle() {
+        active?.ui?.setTitle(deps.title());
+      },
+      subscribe(fn) {
+        subs.add(fn);
+        return () => subs.delete(fn);
+      }
+    };
+    return session;
+  }
+
+  // src/sites.ts
+  var generic = {
+    id: "generic",
+    title: () => document.title || location.hostname
+  };
+  var youtube = {
+    id: "youtube",
+    primaryVideo: () => location.pathname.startsWith("/shorts") ? null : document.querySelector("#movie_player video.html5-main-video"),
+    // "(3) 제목 - YouTube" → "제목"
+    title: () => (document.title || "").replace(/^\(\d+\+?\)\s*/, "").replace(/\s*-\s*YouTube$/, "") || "YouTube",
+    onNavigate: (cb) => window.addEventListener("yt-navigate-finish", cb),
+    // 임베드 플레이어는 상단에 제목 바가 있어 그 아래로 내린다
+    launcherInset: () => location.pathname.startsWith("/embed/") ? 56 : 8
+  };
+  function pickAdapter(loc) {
+    return /(^|\.)youtube(-nocookie)?\.com$/.test(loc.hostname) ? youtube : generic;
+  }
+
+  // src/tracker.ts
+  function score(i) {
+    if (i.tiny) return -Infinity;
+    return (i.playing ? 1e3 : 0) + (i.audible ? 300 : 0) + 200 * i.visible + Math.min(i.area / 1e3, 150) + (i.primary ? 100 : 0);
+  }
+  var usable = (v) => v.isConnected && (v.readyState >= 1 || !!v.currentSrc || !!v.srcObject);
+  function createTracker(doc, adapter) {
+    const all = doc.getElementsByTagName("video");
+    let manual = null;
+    function info(v, primary) {
+      const r = v.getBoundingClientRect();
+      const vw = doc.documentElement.clientWidth || innerWidth;
+      const vh = doc.documentElement.clientHeight || innerHeight;
+      const ix = Math.max(0, Math.min(r.right, vw) - Math.max(r.left, 0));
+      const iy = Math.max(0, Math.min(r.bottom, vh) - Math.max(r.top, 0));
+      const area = r.width * r.height;
+      return {
+        playing: !v.paused && !v.ended,
+        audible: !v.muted && v.volume > 0,
+        visible: area > 0 ? ix * iy / area : 0,
+        area,
+        primary: v === primary,
+        tiny: r.width < 120 || r.height < 68
+      };
+    }
+    function best(cands) {
+      const primary = adapter.primaryVideo?.() ?? null;
+      let top = null, topScore = -Infinity;
+      for (const v of cands) {
+        const s = score(info(v, primary));
+        if (s > topScore) {
+          top = v;
+          topScore = s;
+        }
+      }
+      return top;
+    }
+    return {
+      pick() {
+        if (manual && usable(manual) && manual.ownerDocument === doc) return manual;
+        manual = null;
+        return best(Array.from(all).filter(usable));
+      },
+      at(x, y) {
+        const hits = [];
+        for (const v of Array.from(all)) {
+          if (!usable(v)) continue;
+          const r = v.getBoundingClientRect();
+          if (r.width >= 200 && r.height >= 112 && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) hits.push(v);
+        }
+        return hits.length > 1 ? best(hits) : hits[0] ?? null;
+      },
+      setManual(v) {
+        manual = v;
+      },
+      videos: () => all
+    };
+  }
+
+  // src/main.ts
+  function boot() {
+    const w = window;
+    if (w.__videoPip) return;
+    w.__videoPip = "2.0.0";
+    const top = isTopFrame();
+    const adapter = pickAdapter(location);
+    const local = safeLocalStorage();
+    const config = createConfig(gmBackend() ?? localBackend(local), siteKey(location.hostname), local);
+    const tracker = createTracker(document, adapter);
+    const session = createSession({
+      pick: () => tracker.pick(),
+      title: () => adapter.title(),
+      docPip: () => top && !!window.documentPictureInPicture,
+      requestWindow: (v) => window.documentPictureInPicture.requestWindow(pipWindowSize(v, config.get().pipLongEdge)),
+      mountUI(win, v) {
+        const ui = mountPlayerUI(win, v, {
+          title: adapter.title(),
+          run: (id) => keymap.run(id),
+          hint: (id) => keymap.hint(id),
+          onKey: (e) => keymap.handle(e, "player"),
+          config
+        });
+        win.addEventListener("resize", debounce(() => {
+          config.set({ pipLongEdge: Math.max(win.innerWidth, win.innerHeight) });
+        }, 500));
+        const titleEl = document.querySelector("head > title");
+        if (titleEl) {
+          const mo = new MutationObserver(() => session.refreshTitle());
+          mo.observe(titleEl, { childList: true, characterData: true, subtree: true });
+          win.addEventListener("pagehide", () => mo.disconnect(), { once: true });
+        }
+        win.document.addEventListener("emptied", scheduleRebind, true);
+        return ui;
+      },
+      legacyAvailable: (v) => document.pictureInPictureEnabled && !v.disablePictureInPicture,
+      requestLegacy: (v) => v.requestPictureInPicture().then(() => void 0),
+      exitLegacy: () => {
+        if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {
+        });
+      },
+      toast: (msg) => toast(document, msg)
+    });
+    const keymap = createKeymap(buildCommands(session));
+    window.addEventListener("keydown", (e) => keymap.handle(e, "global"), true);
+    let rebindTimer;
+    function scheduleRebind() {
+      clearTimeout(rebindTimer);
+      rebindTimer = setTimeout(() => session.rebind(), 50);
+    }
+    for (const type of ["loadedmetadata", "play", "emptied"]) document.addEventListener(type, scheduleRebind, true);
+    adapter.onNavigate?.(() => {
+      scheduleRebind();
+      syncAutoPip();
+    });
+    document.addEventListener("fullscreenchange", () => session.fullscreen(document.fullscreenElement));
+    window.addEventListener("pagehide", () => config.flush());
+    let autoRegistered = false;
+    function syncAutoPip() {
+      if (!top || !("mediaSession" in navigator)) return;
+      const on = config.get().autoTabPip && !config.siteDisabled();
+      if (!on && !autoRegistered) return;
+      try {
+        navigator.mediaSession.setActionHandler(
+          "enterpictureinpicture",
+          on ? () => {
+            if (session.mode() === "idle") void session.open(null, "auto");
+          } : null
+        );
+        autoRegistered = on;
+      } catch {
+      }
+    }
+    syncAutoPip();
+    config.subscribe(syncAutoPip);
+    startLauncher(document, {
+      tracker,
+      enabled: () => config.get().launcher && !config.siteDisabled(),
+      busy: () => session.mode() === "opening",
+      open: (v) => void session.open(v),
+      inset: (v) => adapter.launcherInset?.(v) ?? 8
+    });
+  }
+  try {
+    boot();
+  } catch (e) {
+    warn("시작 실패", e);
+  }
 })();

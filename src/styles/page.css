@@ -1,0 +1,33 @@
+/* 원본 페이지에 띄우는 것(⧉ 버튼, 알림). Shadow Root 안이라 사이트 CSS와 섞이지 않는다. */
+:host {
+  all: initial !important;
+  position: fixed !important; top: 0 !important; left: 0 !important;
+  width: 0 !important; height: 0 !important;
+  z-index: 2147483647 !important; pointer-events: none !important;
+}
+* { box-sizing: border-box; }
+.chip {
+  position: fixed; top: 0; right: 0; display: flex; align-items: center; gap: 0; height: 30px; padding: 0 7px;
+  border: 1px solid rgba(255, 255, 255, .2); border-radius: 15px; background: rgba(16, 19, 26, .78);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); box-shadow: 0 2px 10px rgba(0, 0, 0, .35);
+  color: #fff; font: 600 12px/1 system-ui, -apple-system, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+  cursor: pointer; pointer-events: auto;
+  opacity: 0; visibility: hidden; transform: translateY(-4px);
+  transition: opacity .15s, transform .15s, visibility 0s linear .15s, background .15s;
+}
+.chip.show { opacity: 1; visibility: visible; transform: none; transition: opacity .15s, transform .15s, visibility 0s, background .15s; }
+.chip:hover, .chip:focus-visible { background: rgba(79, 157, 255, .95); gap: 6px; }
+.chip:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+.chip svg { display: block; width: 16px; height: 16px; flex: none; }
+.chip .lbl { max-width: 0; overflow: hidden; white-space: nowrap; transition: max-width .2s; }
+.chip:hover .lbl, .chip:focus-visible .lbl { max-width: 64px; }
+
+.toast {
+  position: fixed; left: 50%; bottom: 32px; max-width: min(520px, calc(100vw - 32px)); transform: translate(-50%, 8px);
+  padding: 10px 16px; border-radius: 12px; background: rgba(16, 19, 26, .94); border: 1px solid rgba(255, 255, 255, .12);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .45); color: #f1f4f8; text-align: center;
+  font: 600 13px/1.45 system-ui, -apple-system, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+  opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+@media (prefers-reduced-motion: reduce) { .chip, .chip .lbl, .toast { transition: none !important; } }

@@ -12,7 +12,7 @@ let host: HTMLElement | null = null;
 function layer(doc: Document): ShadowRoot {
   if (!root || !host) {
     host = doc.createElement('video-pip-ui');
-    root = host.attachShadow({ mode: 'closed' });
+    root = host.attachShadow({ mode: 'open' });
     adoptCss(root, css);
   }
   if (!host.isConnected) doc.documentElement.append(host);
@@ -22,17 +22,28 @@ function layer(doc: Document): ShadowRoot {
 let toastEl: HTMLElement | null = null;
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
-export function toast(doc: Document, msg: string): void {
+export interface ToastAction {
+  label: string;
+  run(): void;
+}
+
+/** 알림. action이 있으면 버튼을 달고 조금 더 오래 보여 준다. */
+export function toast(doc: Document, msg: string, action?: ToastAction): void {
   const r = layer(doc);
   if (!toastEl) {
     toastEl = h(doc, 'div', { class: 'toast', role: 'status' });
     r.append(toastEl);
   }
   const el = toastEl;
-  el.textContent = msg;
+  const hide = () => el.classList.remove('show');
+  el.replaceChildren(h(doc, 'span', { text: msg }));
+  el.classList.toggle('act', !!action);
+  if (action) {
+    el.append(h(doc, 'button', { class: 'tbtn', type: 'button', text: action.label, onclick: () => { hide(); action.run(); } }));
+  }
   requestAnimationFrame(() => el.classList.add('show'));
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 3200);
+  toastTimer = setTimeout(hide, action ? 7000 : 3200);
 }
 
 export interface LauncherDeps {

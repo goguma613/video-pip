@@ -77,6 +77,13 @@ function boot(): void {
     requestLegacy: (v) => v.requestPictureInPicture().then(() => undefined),
     exitLegacy: () => { if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {}); },
     toast: (msg) => toast(document, msg),
+    // 보이지 않는 자리로 돌아가 영상을 멈췄으면 알리고, 가능하면 그 영상으로 돌아갈 수 있게
+    onRestored(v, result, home) {
+      if (!result.wasPlaying || !result.hidden) return;
+      const url = adapter.watchUrl?.(home, v.currentTime) ?? null;
+      toast(document, 'PiP를 닫아서 영상을 일시정지했어요.',
+        url ? { label: '영상으로 가기', run: () => location.assign(url) } : undefined);
+    },
   });
   const keymap = createKeymap(buildCommands(session));
 

@@ -46,9 +46,26 @@ export function moveTo(token: DockToken, slot: Element): void {
   slot.append(token.video);
 }
 
-/** 멱등. 표식 앞 → 원래 부모 → (집이 사라졌으면) 영상을 놓아준다. */
-export function restore(token: DockToken): void {
-  if (token.done) return;
+export interface RestoreResult {
+  /** 돌려놓기 직전에 재생 중이었나 */
+  wasPlaying: boolean;
+  /** 돌아간 자리가 화면에 그려지지 않는 곳인가(숨겨진 페이지 등) → 이 경우 영상을 멈췄다 */
+  hidden: boolean;
+}
+
+/** 화면에 그려지지 않는 곳(display:none 조상 등)에 있나. 스크롤로 화면 밖에 있는 건 보이는 것으로 친다 */
+export function isHidden(el: Element): boolean {
+  if (!el.isConnected) return true;
+  if (typeof el.checkVisibility === 'function') return !el.checkVisibility();
+  return el.getClientRects().length === 0;
+}
+
+/**
+ * 멱등. 표식 앞 → 원래 부모 → (집이 사라졌으면) 영상을 놓아준다.
+ * 보이지 않는 자리로 돌아가면 영상을 멈춘다 — 화면은 없는데 소리만 나는 상황을 막는다.
+ */
+export function restore(token: DockToken): RestoreResult {
+  if (token.done) return { wasPlaying: false, hidden: false };
   token.done = true;
   const { video, anchor, spacer, parent } = token;
   const wasPlaying = !video.paused && !video.ended;
@@ -57,8 +74,12 @@ export function restore(token: DockToken): void {
   else video.remove();
   anchor.remove();
   spacer?.remove();
-  // 문서 간 이동으로 멈췄다면 한 번 다시 재생
-  if (wasPlaying && video.isConnected) {
-    setTimeout(() => { if (video.paused && !video.ended) video.play()?.catch(() => {}); }, 200);
+  const hidden = isHidden(video);
+  if (hidden) {
+    if (!video.paused) video.pause();
+  } else if (wasPlaying) {
+    // 문서 간 이동으로 멈췄다면 한 번 다시 재생(보이는 자리일 때만)
+    setTimeout(() => { if (video.paused && !video.ended && !isHidden(video)) video.play()?.catch(() => {}); }, 200);
   }
+  return { wasPlaying, hidden };
 }

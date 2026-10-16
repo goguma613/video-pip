@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import * as dock from '../src/dock';
 
 function rect(w: number, h: number) {
@@ -75,6 +75,30 @@ describe('Dock', () => {
     p.box.remove();
     dock.restore(t);
     expect(p.video.isConnected).toBe(false);
+  });
+
+  it('보이지 않는 자리로 돌아가면 영상을 멈추고 알린다(화면 없이 소리만 나는 것 방지)', () => {
+    const p = page();
+    Object.defineProperty(p.video, 'paused', { configurable: true, value: false });
+    const pause = vi.fn(() => Object.defineProperty(p.video, 'paused', { configurable: true, value: true }));
+    p.video.pause = pause;
+    p.video.checkVisibility = () => false; // 예: 유튜브 홈에 있는 동안 숨겨진 시청 화면
+    const t = dock.detach(p.video);
+    dock.moveTo(t, p.slot);
+    expect(dock.restore(t)).toEqual({ wasPlaying: true, hidden: true });
+    expect(pause).toHaveBeenCalled();
+  });
+
+  it('보이는 자리로 돌아가면 멈추지 않는다', () => {
+    const p = page();
+    Object.defineProperty(p.video, 'paused', { configurable: true, value: false });
+    const pause = vi.fn();
+    p.video.pause = pause;
+    p.video.checkVisibility = () => true;
+    const t = dock.detach(p.video);
+    dock.moveTo(t, p.slot);
+    expect(dock.restore(t)).toEqual({ wasPlaying: true, hidden: false });
+    expect(pause).not.toHaveBeenCalled();
   });
 
   it('붙어 있지 않은 영상은 거부한다', () => {

@@ -16,6 +16,8 @@ export interface SiteAdapter {
   videoId?(home: Node | null): string | null;
   /** 사이트가 비워 버린 영상을 같은 플레이어에 다시 불러온다. 했으면 true */
   reload?(home: Node | null, id: string, at: number): boolean;
+  /** 그 영상을 보던 위치부터 볼 수 있는 페이지 주소 */
+  watchUrl?(home: Node | null, at: number): string | null;
   /** 진단 기록용 플레이어 객체 */
   player?(): object | null;
   /** ⧉ 버튼의 영상 상단 여백(px). 사이트 UI를 피할 때 */
@@ -76,6 +78,10 @@ const youtube: SiteAdapter = {
     return location.pathname === '/watch' ? new URLSearchParams(location.search).get('v') : null;
   },
   // 유튜브는 시청 페이지를 떠나면 영상 요소를 직접 비운다(src 제거 + load). 같은 플레이어에 다시 불러온다
+  watchUrl(home, at) {
+    const id = youtube.videoId!(home);
+    return id ? `/watch?v=${encodeURIComponent(id)}&t=${Math.max(0, Math.floor(at))}s` : null;
+  },
   reload(home, id, at) {
     const p = ownerPlayer(home);
     if (typeof p?.loadVideoById !== 'function') return false;

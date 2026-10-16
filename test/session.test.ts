@@ -219,6 +219,18 @@ describe('Session', () => {
     expect(isHome(t)).toBe(true);
   });
 
+  it('닫은 뒤 돌아간 자리와 결과를 알린다', async () => {
+    const onRestored = vi.fn();
+    const t = setup({ onRestored });
+    await t.session.open();
+    await t.session.close();
+    expect(onRestored).toHaveBeenCalledTimes(1);
+    const [video, result, home] = onRestored.mock.calls[0];
+    expect(video).toBe(t.video);
+    expect(result).toHaveProperty('hidden');
+    expect(home).toBe(t.box);
+  });
+
   it('상태 변화를 알린다', async () => {
     const t = setup();
     const seen: string[] = [];

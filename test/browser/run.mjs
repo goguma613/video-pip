@@ -25,7 +25,7 @@ await context.route('**/*', async (route) => {
   const u = new URL(route.request().url());
   let file = u.pathname === '/' ? 'inflow.html' : u.pathname.slice(1);
   if (u.hostname === 'www.youtube.com' && u.pathname === '/watch') {
-    file = { 'live-api': 'yt-live-api.html', 'live-class': 'yt-live-class.html', nav: 'yt-nav.html' }[u.searchParams.get('v')] ?? 'yt.html';
+    file = { 'live-api': 'yt-live-api.html', 'live-class': 'yt-live-class.html', nav: 'yt-nav.html', quality: 'yt-quality.html' }[u.searchParams.get('v')] ?? 'yt.html';
   }
   const p = path.join(DIR, file);
   if (!fs.existsSync(p)) return route.fulfill({ status: 404, body: 'nf' });
@@ -512,6 +512,72 @@ const toastOf = (page) => page.evaluate(() => {
   const u = new URL(page.url());
   const sec = parseInt(u.searchParams.get('t'), 10);
   check('버튼 → 그 영상의 보던 위치로 이동', u.pathname === '/watch' && u.searchParams.get('v') === 'nav1' && Math.abs(sec - at) <= 2, page.url());
+  await page.close();
+}
+
+// ── L. 화질 표시 · 바꾸기 ──
+console.log('\nL. 화질');
+const openPip = async (url) => {
+  const page = await context.newPage();
+  await page.goto(url);
+  await waitPlaying(page, 'video');
+  await page.mouse.click(1000, 700);
+  await page.keyboard.press('Alt+KeyP');
+  await page.waitForFunction(() => !!documentPictureInPicture.window?.document.querySelector('.stage video'), null, { timeout: 5000 });
+  return page;
+};
+const qState = (page) => pipEval(page, (w) => {
+  const d = w.document, b = d.querySelector('.q'), m = d.querySelector('.qmenu');
+  return {
+    chip: b?.textContent, can: b?.classList.contains('can'), hidden: b?.hidden,
+    menu: !m.hidden, items: [...m.querySelectorAll('.qi')].map((i) => [i.firstChild.textContent, i.getAttribute('aria-checked')]),
+  };
+});
+{
+  const page = await openPip('https://site.test/inflow.html');
+  let s = await qState(page);
+  check('일반 사이트: 실제 해상도 표시(320×180 → 180p)', s.chip === '180p' && !s.hidden, JSON.stringify(s));
+  await pipEval(page, (w) => w.document.querySelector('.q').click());
+  s = await qState(page);
+  check('일반 사이트: 화질을 바꿀 수 없으니 메뉴 없음', !s.can && !s.menu, JSON.stringify(s));
+  await pipEval(page, (w) => w.close());
+  await page.close();
+}
+{
+  const page = await openPip('https://www.youtube.com/watch?v=quality');
+  await pipEval(page, (w) => w.document.querySelector('.q').click());
+  let s = await qState(page);
+  const labels = s.items.map((i) => i[0]);
+  check('유튜브: 표시를 누르면 바로 화질 목록(재생 불가 화질은 뺌)', s.can && s.menu && JSON.stringify(labels) === JSON.stringify(['최고 화질', '360p', '180p', '자동']), JSON.stringify(s));
+  check('처음엔 "자동"이 선택됨', s.items.find((i) => i[0] === '자동')?.[1] === 'true');
+  await pipEval(page, (w) => [...w.document.querySelectorAll('.qi')].find((i) => i.firstChild.textContent === '360p').click());
+  await page.waitForFunction(() => documentPictureInPicture.window?.document.querySelector('.q')?.textContent === '360p', null, { timeout: 5000 }).catch(() => {});
+  s = await qState(page);
+  check('360p 선택 → 유튜브에 요청하고, 실제 해상도가 바뀌면 표시도 360p', s.chip === '360p' && !s.menu && (await page.evaluate(() => window.__q.includes('medium'))), JSON.stringify(s));
+  await pipEval(page, (w) => w.document.querySelector('.q').click());
+  s = await qState(page);
+  check('이 영상에 고른 화질에 체크', s.items.find((i) => i[0] === '360p')?.[1] === 'true', JSON.stringify(s.items));
+  await pipEval(page, (w) => [...w.document.querySelectorAll('.qi')].find((i) => i.firstChild.textContent === '최고 화질').click());
+  await page.waitForTimeout(500);
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('vpip:v2') || '{}').quality);
+  check('"최고 화질 · 항상" → 선호로 저장', saved === 'max', String(saved));
+  await pipEval(page, (w) => w.close());
+  await page.close();
+}
+{
+  const page = await openPip('https://www.youtube.com/watch?v=quality'); // 저장된 선호: 최고 화질
+  await page.waitForFunction(() => documentPictureInPicture.window?.document.querySelector('.q')?.textContent === '360p', null, { timeout: 5000 }).catch(() => {});
+  const s = await qState(page);
+  check('"항상 최고 화질"이면 PiP를 열 때 알아서 최고 화질로', s.chip === '360p' && (await page.evaluate(() => window.__q[0] === 'medium')), JSON.stringify({ s, q: await page.evaluate(() => window.__q) }));
+  const pip = context.pages().at(-1);
+  if (pip && pip !== page) {
+    await pip.setViewportSize({ width: 480, height: 270 });
+    await pipEval(page, (w) => w.document.querySelector('.q').click());
+    await pip.waitForTimeout(250);
+    await pip.screenshot({ path: path.join(SHOTS, 'pip-quality-menu.png') });
+  }
+  await page.evaluate(() => localStorage.removeItem('vpip:v2'));
+  await pipEval(page, (w) => w.close());
   await page.close();
 }
 

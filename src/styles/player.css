@@ -74,6 +74,20 @@ svg { display: block; }
 .rate:hover { background: rgba(255, 255, 255, .2); }
 .rate.on { color: #ffb84f; }
 
+/* 화질 표시 · 메뉴 */
+.q { min-width: 44px; height: 26px; padding: 0 8px; margin-left: 4px; border-radius: 13px; background: rgba(255, 255, 255, .12); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; cursor: default; }
+.q.hd { color: #8fd0ff; }
+.q.can { cursor: pointer; }
+.q.can:hover { background: rgba(255, 255, 255, .2); }
+.qmenu { position: absolute; z-index: 2; right: 8px; bottom: 46px; width: 200px; max-width: calc(100% - 16px); max-height: calc(100% - 56px); overflow: auto; padding: 6px; border-radius: 12px; background: var(--panel); border: 1px solid rgba(255, 255, 255, .1); box-shadow: 0 8px 24px rgba(0, 0, 0, .5); }
+.qhead { padding: 5px 8px 4px; font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.qi { display: flex; width: 100%; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 8px; text-align: left; font-size: 12.5px; }
+.qi::before { content: ''; flex: none; width: 14px; text-align: center; color: var(--accent); font-weight: 700; }
+.qi[aria-checked='true']::before { content: '✓'; }
+.qi:hover { background: rgba(255, 255, 255, .08); }
+.qsub { margin-left: auto; font-size: 11px; color: var(--dim); }
+.qsep { height: 1px; margin: 4px 6px; background: rgba(255, 255, 255, .1); }
+
 /* ⚙ 팝오버 */
 .pop { position: absolute; z-index: 2; top: 42px; right: 8px; width: 264px; max-width: calc(100% - 16px); max-height: calc(100% - 52px); overflow: auto; padding: 6px; border-radius: 12px; background: var(--panel); border: 1px solid rgba(255, 255, 255, .1); box-shadow: 0 8px 24px rgba(0, 0, 0, .5); }
 .pop[hidden] { display: none; }

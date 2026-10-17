@@ -5,6 +5,7 @@ import { startKeepAlive } from './keepalive';
 import { startLauncher, toast } from './launcher';
 import * as media from './media';
 import { mountPlayerUI } from './player-ui';
+import { createQuality } from './quality';
 import { createSession } from './session';
 import { pickAdapter } from './sites';
 import { createTracker } from './tracker';
@@ -50,6 +51,7 @@ function boot(): void {
         config,
         isLive: (x) => adapter.isLive?.(x) ?? media.isLive(x),
         toLiveEdge: (x) => { if (!adapter.toLiveEdge?.(x)) media.toLiveEdge(x); },
+        quality,
       });
       // 창 크기 기억. 크기는 이벤트 시점에 읽는다(0.5초 뒤엔 창이 이미 닫혀 0일 수 있음)
       win.addEventListener('resize', () => {
@@ -66,6 +68,11 @@ function boot(): void {
       // PiP 창 안의 영상이 비워지거나 멈추면(사이트가 다른 영상으로 갈아탐) 재연결 검사
       for (const type of ['emptied', 'pause', 'ended']) win.document.addEventListener(type, scheduleRebind, true);
       keepAlive.attach(win.document);
+      // 고른 화질 · "항상 최고 화질"을 영상을 새로 불러올 때마다 맞춘다(사이트가 "자동"으로 되돌릴 수 있음)
+      quality.loaded(true);
+      win.document.addEventListener('loadstart', () => quality.loaded(), true);
+      for (const type of ['loadedmetadata', 'playing', 'resize']) win.document.addEventListener(type, () => quality.ensure(), true);
+      setTimeout(() => quality.ensure(), 0);
       return ui;
     },
     legacyAvailable: (v) => document.pictureInPictureEnabled && !v.disablePictureInPicture,
@@ -82,6 +89,10 @@ function boot(): void {
   });
   const keymap = createKeymap(buildCommands(session));
   const keepAlive = startKeepAlive(session, adapter);
+  const quality = createQuality(adapter, config, () => session.home(), () => {
+    const v = session.video();
+    return adapter.videoId?.(session.home()) ?? v?.currentSrc ?? null;
+  });
 
   // 페이지에선 전역 명령(Alt+P)만 가로챈다 → 사이트 단축키는 그대로
   window.addEventListener('keydown', (e) => keymap.handle(e, 'global'), true);

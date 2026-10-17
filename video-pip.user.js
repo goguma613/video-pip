@@ -2,7 +2,7 @@
 // @name           🎬 고화질 영상 PIP (Picture-in-Picture)
 // @name:en        HD Video Picture-in-Picture
 // @namespace      https://github.com/goguma613/video-pip
-// @version        2.0.6
+// @version        2.1.0
 // @description    영상을 원본 화질 그대로 항상 위에 뜨는 작은 창으로. 영상 위 ⧉ 버튼 또는 Alt+P 한 번이면 끝.
 // @description:en Pop any video into an always-on-top window at original quality (Document Picture-in-Picture). Hover button or Alt+P.
 // @author         goguma613
@@ -206,7 +206,8 @@
     autoTabPip: false,
     launcher: true,
     disabledSites: [],
-    hinted: false
+    hinted: false,
+    quality: "auto"
   };
   var LONG_EDGE_MIN = 240;
   var LONG_EDGE_MAX = 1920;
@@ -223,7 +224,8 @@
       autoTabPip: bool(r.autoTabPip, DEFAULTS.autoTabPip),
       launcher: bool(r.launcher, DEFAULTS.launcher),
       disabledSites: [...new Set(sites)].slice(0, 500),
-      hinted: bool(r.hinted, DEFAULTS.hinted)
+      hinted: bool(r.hinted, DEFAULTS.hinted),
+      quality: r.quality === "max" ? "max" : "auto"
     };
   }
   function migrateV1(raw) {
@@ -685,7 +687,74 @@
   }
 
   // src/styles/player.css
-  var player_default = "/* PiP 창 안 플레이어. 이 스타일시트는 PiP 창 문서에만 있으므로, 영상이 돌아가면 효과도 저절로 사라진다. */\n:root {\n  color-scheme: dark;\n  --fg: #f1f4f8;\n  --dim: #b4bdc9;\n  --accent: #4f9dff;\n  --panel: rgba(20, 24, 32, 0.96);\n  font: 13px/1.3 system-ui, -apple-system, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;\n}\n* { box-sizing: border-box; margin: 0; padding: 0; }\nhtml, body { height: 100%; overflow: hidden; background: #000; color: var(--fg); }\nbutton { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex: none; }\nbutton:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }\nsvg { display: block; }\n[hidden] { display: none !important; }\n\n.stage { position: fixed; inset: 0; container: stage / inline-size; user-select: none; -webkit-user-select: none; }\n\n/* 영상: 사이트가 넣은 인라인 크기·위치를 덮어쓰기만 하고 지우지는 않는다(Zero-touch) */\n.slot { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #000; }\n.slot > video {\n  position: static !important; display: block !important;\n  width: 100% !important; height: 100% !important;\n  min-width: 0 !important; min-height: 0 !important; max-width: none !important; max-height: none !important;\n  margin: 0 !important; inset: auto !important; transform: none !important; filter: none !important;\n  object-fit: contain !important; opacity: 1 !important; visibility: visible !important;\n}\n/* controls 속성이 있는 영상의 브라우저 기본 컨트롤 숨김(Chromium). 별도 규칙이라 다른 브라우저에서 무시돼도 위 규칙은 유지 */\n.slot > video::-webkit-media-controls { display: none !important; }\n\n/* 오버레이: 항상 클릭을 받고(빈 곳 클릭 = 재생/일시정지), 숨김 상태에선 내용만 감춘다 */\n.ov { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: space-between; }\n.ov.idle { cursor: none; }\n.top, .mid, .bot { transition: opacity .14s ease, visibility 0s; }\n.ov.idle .top, .ov.idle .mid, .ov.idle .bot { opacity: 0; visibility: hidden; transition: opacity .32s ease, visibility 0s linear .32s; }\n\n.top { position: relative; z-index: 1; display: flex; align-items: center; gap: 2px; padding: 6px 6px 20px 12px; background: linear-gradient(rgba(0, 0, 0, .7), transparent); }\n.ttl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 600; text-shadow: 0 1px 2px rgba(0, 0, 0, .6); }\n\n.mid { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 28px; pointer-events: none; }\n.mid > button { pointer-events: auto; }\n\n.bot { position: relative; z-index: 1; padding: 22px 10px 4px; background: linear-gradient(transparent, rgba(0, 0, 0, .75)); }\n\n.ib { width: 32px; height: 32px; border-radius: 8px; }\n.ib:hover { background: rgba(255, 255, 255, .14); }\n.ib svg { width: 20px; height: 20px; }\n.cb { width: 44px; height: 44px; border-radius: 50%; background: rgba(0, 0, 0, .45); }\n.cb svg { width: 26px; height: 26px; }\n.cb.big { width: 60px; height: 60px; }\n.cb.big svg { width: 34px; height: 34px; }\n.cb:hover { background: rgba(79, 157, 255, .9); }\n\n/* 시크바 */\n.seek { position: relative; height: 18px; display: flex; align-items: center; cursor: pointer; touch-action: none; }\n.track { position: relative; width: 100%; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, .25); transition: height .1s; }\n.seek:hover .track, .seek.drag .track { height: 6px; }\n.buf, .played { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: inherit; }\n.buf { background: rgba(255, 255, 255, .35); }\n.played { background: var(--accent); }\n.thumb { position: absolute; top: 50%; left: 0; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: var(--accent); transform: scale(0); transition: transform .1s; }\n.seek:hover .thumb, .seek.drag .thumb { transform: scale(1); }\n.tip { position: absolute; bottom: 20px; left: 0; transform: translateX(-50%); padding: 2px 6px; border-radius: 6px; background: var(--panel); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; display: none; }\n.seek:hover .tip, .seek.drag .tip { display: block; }\n.seek.is-live .track { cursor: pointer; }\n\n.row { display: flex; align-items: center; gap: 2px; height: 34px; }\n.time { padding: 0 6px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--dim); white-space: nowrap; }\n.live { height: 20px; padding: 0 7px; margin: 0 6px; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: .3px; background: rgba(255, 255, 255, .16); }\n.live.edge { background: #e53935; }\n.grow { flex: 1; }\n.vol { width: 72px; height: 4px; accent-color: var(--accent); cursor: pointer; }\n.rate { min-width: 46px; height: 26px; padding: 0 9px; margin-left: 4px; border-radius: 13px; background: rgba(255, 255, 255, .12); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }\n.rate:hover { background: rgba(255, 255, 255, .2); }\n.rate.on { color: #ffb84f; }\n\n/* ⚙ 팝오버 */\n.pop { position: absolute; z-index: 2; top: 42px; right: 8px; width: 264px; max-width: calc(100% - 16px); max-height: calc(100% - 52px); overflow: auto; padding: 6px; border-radius: 12px; background: var(--panel); border: 1px solid rgba(255, 255, 255, .1); box-shadow: 0 8px 24px rgba(0, 0, 0, .5); }\n.pop[hidden] { display: none; }\n.opt { display: flex; width: 100%; align-items: center; gap: 10px; padding: 9px 8px; border-radius: 8px; text-align: left; font-size: 12.5px; }\n.opt:hover { background: rgba(255, 255, 255, .08); }\n.opt .lbl { flex: 1; }\n.opt .sub { display: block; margin-top: 2px; font-size: 11px; color: var(--dim); }\n.sw { position: relative; flex: none; width: 32px; height: 18px; border-radius: 9px; background: rgba(255, 255, 255, .25); transition: background .15s; }\n.sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform .15s; }\n.opt[aria-checked='true'] .sw { background: var(--accent); }\n.opt[aria-checked='true'] .sw::after { transform: translateX(14px); }\n.ver { padding: 6px 8px 3px; font-size: 11px; color: var(--dim); }\n\n/* 첫 진입 힌트 */\n.hint { position: absolute; z-index: 3; left: 50%; top: 48px; transform: translateX(-50%); max-width: calc(100% - 24px); padding: 8px 12px; border-radius: 10px; background: rgba(79, 157, 255, .95); color: #fff; font-size: 12px; text-align: center; pointer-events: none; transition: opacity .4s; }\n.hint.out { opacity: 0; }\n\n/* 좁은 창: 중앙은 재생 버튼만, 하단은 재생 · 시간 · 배속 */\n@container stage (max-width: 359px) {\n  .mid .side, .mute, .vol { display: none; }\n  .ttl { font-size: 12px; }\n}\n/* 낮은 창: 중앙 버튼 생략 */\n@media (max-height: 200px) {\n  .mid { display: none; }\n  .top { padding-bottom: 8px; }\n  .bot { padding-top: 8px; }\n}\n@media (prefers-reduced-motion: reduce) {\n  *, *::after { transition: none !important; }\n}\n";
+  var player_default = "/* PiP 창 안 플레이어. 이 스타일시트는 PiP 창 문서에만 있으므로, 영상이 돌아가면 효과도 저절로 사라진다. */\n:root {\n  color-scheme: dark;\n  --fg: #f1f4f8;\n  --dim: #b4bdc9;\n  --accent: #4f9dff;\n  --panel: rgba(20, 24, 32, 0.96);\n  font: 13px/1.3 system-ui, -apple-system, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;\n}\n* { box-sizing: border-box; margin: 0; padding: 0; }\nhtml, body { height: 100%; overflow: hidden; background: #000; color: var(--fg); }\nbutton { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex: none; }\nbutton:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }\nsvg { display: block; }\n[hidden] { display: none !important; }\n\n.stage { position: fixed; inset: 0; container: stage / inline-size; user-select: none; -webkit-user-select: none; }\n\n/* 영상: 사이트가 넣은 인라인 크기·위치를 덮어쓰기만 하고 지우지는 않는다(Zero-touch) */\n.slot { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #000; }\n.slot > video {\n  position: static !important; display: block !important;\n  width: 100% !important; height: 100% !important;\n  min-width: 0 !important; min-height: 0 !important; max-width: none !important; max-height: none !important;\n  margin: 0 !important; inset: auto !important; transform: none !important; filter: none !important;\n  object-fit: contain !important; opacity: 1 !important; visibility: visible !important;\n}\n/* controls 속성이 있는 영상의 브라우저 기본 컨트롤 숨김(Chromium). 별도 규칙이라 다른 브라우저에서 무시돼도 위 규칙은 유지 */\n.slot > video::-webkit-media-controls { display: none !important; }\n\n/* 오버레이: 항상 클릭을 받고(빈 곳 클릭 = 재생/일시정지), 숨김 상태에선 내용만 감춘다 */\n.ov { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: space-between; }\n.ov.idle { cursor: none; }\n.top, .mid, .bot { transition: opacity .14s ease, visibility 0s; }\n.ov.idle .top, .ov.idle .mid, .ov.idle .bot { opacity: 0; visibility: hidden; transition: opacity .32s ease, visibility 0s linear .32s; }\n\n.top { position: relative; z-index: 1; display: flex; align-items: center; gap: 2px; padding: 6px 6px 20px 12px; background: linear-gradient(rgba(0, 0, 0, .7), transparent); }\n.ttl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 600; text-shadow: 0 1px 2px rgba(0, 0, 0, .6); }\n\n.mid { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 28px; pointer-events: none; }\n.mid > button { pointer-events: auto; }\n\n.bot { position: relative; z-index: 1; padding: 22px 10px 4px; background: linear-gradient(transparent, rgba(0, 0, 0, .75)); }\n\n.ib { width: 32px; height: 32px; border-radius: 8px; }\n.ib:hover { background: rgba(255, 255, 255, .14); }\n.ib svg { width: 20px; height: 20px; }\n.cb { width: 44px; height: 44px; border-radius: 50%; background: rgba(0, 0, 0, .45); }\n.cb svg { width: 26px; height: 26px; }\n.cb.big { width: 60px; height: 60px; }\n.cb.big svg { width: 34px; height: 34px; }\n.cb:hover { background: rgba(79, 157, 255, .9); }\n\n/* 시크바 */\n.seek { position: relative; height: 18px; display: flex; align-items: center; cursor: pointer; touch-action: none; }\n.track { position: relative; width: 100%; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, .25); transition: height .1s; }\n.seek:hover .track, .seek.drag .track { height: 6px; }\n.buf, .played { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: inherit; }\n.buf { background: rgba(255, 255, 255, .35); }\n.played { background: var(--accent); }\n.thumb { position: absolute; top: 50%; left: 0; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: var(--accent); transform: scale(0); transition: transform .1s; }\n.seek:hover .thumb, .seek.drag .thumb { transform: scale(1); }\n.tip { position: absolute; bottom: 20px; left: 0; transform: translateX(-50%); padding: 2px 6px; border-radius: 6px; background: var(--panel); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; display: none; }\n.seek:hover .tip, .seek.drag .tip { display: block; }\n.seek.is-live .track { cursor: pointer; }\n\n.row { display: flex; align-items: center; gap: 2px; height: 34px; }\n.time { padding: 0 6px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--dim); white-space: nowrap; }\n.live { height: 20px; padding: 0 7px; margin: 0 6px; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: .3px; background: rgba(255, 255, 255, .16); }\n.live.edge { background: #e53935; }\n.grow { flex: 1; }\n.vol { width: 72px; height: 4px; accent-color: var(--accent); cursor: pointer; }\n.rate { min-width: 46px; height: 26px; padding: 0 9px; margin-left: 4px; border-radius: 13px; background: rgba(255, 255, 255, .12); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }\n.rate:hover { background: rgba(255, 255, 255, .2); }\n.rate.on { color: #ffb84f; }\n\n/* 화질 표시 · 메뉴 */\n.q { min-width: 44px; height: 26px; padding: 0 8px; margin-left: 4px; border-radius: 13px; background: rgba(255, 255, 255, .12); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; cursor: default; }\n.q.hd { color: #8fd0ff; }\n.q.can { cursor: pointer; }\n.q.can:hover { background: rgba(255, 255, 255, .2); }\n.qmenu { position: absolute; z-index: 2; right: 8px; bottom: 46px; width: 200px; max-width: calc(100% - 16px); max-height: calc(100% - 56px); overflow: auto; padding: 6px; border-radius: 12px; background: var(--panel); border: 1px solid rgba(255, 255, 255, .1); box-shadow: 0 8px 24px rgba(0, 0, 0, .5); }\n.qhead { padding: 5px 8px 4px; font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; }\n.qi { display: flex; width: 100%; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 8px; text-align: left; font-size: 12.5px; }\n.qi::before { content: ''; flex: none; width: 14px; text-align: center; color: var(--accent); font-weight: 700; }\n.qi[aria-checked='true']::before { content: '✓'; }\n.qi:hover { background: rgba(255, 255, 255, .08); }\n.qsub { margin-left: auto; font-size: 11px; color: var(--dim); }\n.qsep { height: 1px; margin: 4px 6px; background: rgba(255, 255, 255, .1); }\n\n/* ⚙ 팝오버 */\n.pop { position: absolute; z-index: 2; top: 42px; right: 8px; width: 264px; max-width: calc(100% - 16px); max-height: calc(100% - 52px); overflow: auto; padding: 6px; border-radius: 12px; background: var(--panel); border: 1px solid rgba(255, 255, 255, .1); box-shadow: 0 8px 24px rgba(0, 0, 0, .5); }\n.pop[hidden] { display: none; }\n.opt { display: flex; width: 100%; align-items: center; gap: 10px; padding: 9px 8px; border-radius: 8px; text-align: left; font-size: 12.5px; }\n.opt:hover { background: rgba(255, 255, 255, .08); }\n.opt .lbl { flex: 1; }\n.opt .sub { display: block; margin-top: 2px; font-size: 11px; color: var(--dim); }\n.sw { position: relative; flex: none; width: 32px; height: 18px; border-radius: 9px; background: rgba(255, 255, 255, .25); transition: background .15s; }\n.sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform .15s; }\n.opt[aria-checked='true'] .sw { background: var(--accent); }\n.opt[aria-checked='true'] .sw::after { transform: translateX(14px); }\n.ver { padding: 6px 8px 3px; font-size: 11px; color: var(--dim); }\n\n/* 첫 진입 힌트 */\n.hint { position: absolute; z-index: 3; left: 50%; top: 48px; transform: translateX(-50%); max-width: calc(100% - 24px); padding: 8px 12px; border-radius: 10px; background: rgba(79, 157, 255, .95); color: #fff; font-size: 12px; text-align: center; pointer-events: none; transition: opacity .4s; }\n.hint.out { opacity: 0; }\n\n/* 좁은 창: 중앙은 재생 버튼만, 하단은 재생 · 시간 · 배속 */\n@container stage (max-width: 359px) {\n  .mid .side, .mute, .vol { display: none; }\n  .ttl { font-size: 12px; }\n}\n/* 낮은 창: 중앙 버튼 생략 */\n@media (max-height: 200px) {\n  .mid { display: none; }\n  .top { padding-bottom: 8px; }\n  .bot { padding-top: 8px; }\n}\n@media (prefers-reduced-motion: reduce) {\n  *, *::after { transition: none !important; }\n}\n";
+
+  // src/quality.ts
+  function resolutionLabel(w, h2) {
+    if (!(w > 0 && h2 > 0)) return "";
+    const long = Math.max(w, h2), short2 = Math.min(w, h2);
+    const tiers = [
+      [7680, 4320, "8K"],
+      [3840, 2160, "4K"],
+      [2560, 1440, "1440p"],
+      [1920, 1080, "1080p"],
+      [1280, 720, "720p"],
+      [854, 480, "480p"],
+      [640, 360, "360p"],
+      [426, 240, "240p"]
+    ];
+    for (const [l, s, name] of tiers) if (long >= l * 0.9 || short2 >= s * 0.9) return name;
+    return `${short2}p`;
+  }
+  var MAX_TRIES = 3;
+  function createQuality(adapter, config, home, videoKey) {
+    let manual = null;
+    let loadSeq = 0;
+    let appliedSeq = -1;
+    let tries = { key: null, n: 0 };
+    const supported = () => typeof adapter.qualityLevels === "function" && typeof adapter.setQuality === "function";
+    const levels = () => supported() ? adapter.qualityLevels(home()) : [];
+    const set = (id) => adapter.setQuality?.(home(), id) ?? false;
+    const manualHere = () => manual !== null && manual.key === videoKey();
+    return {
+      supported,
+      levels,
+      choice: () => manualHere() ? manual.id : config.get().quality,
+      choose(c) {
+        if (!supported()) return;
+        if (c === "max" || c === "auto") {
+          manual = null;
+          config.set({ quality: c });
+          const target = c === "max" ? levels()[0]?.id : "auto";
+          if (target && set(target)) appliedSeq = loadSeq;
+        } else {
+          manual = { key: videoKey(), id: c };
+          if (set(c)) appliedSeq = loadSeq;
+        }
+      },
+      loaded(newSession = false) {
+        loadSeq++;
+        if (newSession) tries = { key: null, n: 0 };
+      },
+      ensure() {
+        if (!supported() || appliedSeq === loadSeq) return;
+        const pref = config.get().quality;
+        if (!manualHere() && pref !== "max") {
+          appliedSeq = loadSeq;
+          return;
+        }
+        const key = videoKey();
+        if (tries.key !== key) tries = { key, n: 0 };
+        if (tries.n >= MAX_TRIES) return;
+        const target = manualHere() ? manual.id : levels()[0]?.id;
+        if (!target) return;
+        if (set(target)) {
+          appliedSeq = loadSeq;
+          tries.n++;
+        }
+      }
+    };
+  }
 
   // src/player-ui.ts
   var HIDE_MS = 2400;
@@ -718,11 +787,13 @@
     const muteB = btn("ib mute", "mute", "volume");
     const vol = h(doc, "input", { class: "vol", type: "range", min: "0", max: "100", step: "1", "aria-label": "볼륨" });
     const rate = h(doc, "button", { class: "rate", type: "button", title: "배속 (클릭: 바꾸기 · [ / ] / =)", "aria-label": "배속", onclick: () => deps.run("rateCycle") });
-    const row = h(doc, "div", { class: "row" }, playB, time, liveB, h(doc, "span", { class: "grow" }), muteB, vol, rate);
+    const qB = h(doc, "button", { class: "q", type: "button", "aria-haspopup": "menu", "aria-expanded": "false" });
+    const row = h(doc, "div", { class: "row" }, playB, time, liveB, h(doc, "span", { class: "grow" }), muteB, vol, qB, rate);
     const bot = h(doc, "div", { class: "bot" }, seek, row);
     const ov = h(doc, "div", { class: "ov" }, top, mid, bot);
     const pop = buildPopover(doc, deps.config);
-    const stage = h(doc, "div", { class: "stage" }, slot, ov, pop.root);
+    const qMenu = h(doc, "div", { class: "qmenu", role: "menu", "aria-label": "화질", hidden: true });
+    const stage = h(doc, "div", { class: "stage" }, slot, ov, pop.root, qMenu);
     doc.body.append(stage);
     let visible = true;
     let dragging = false;
@@ -769,11 +840,25 @@
       rate.textContent = `${Number(r.toFixed(2))}x`;
       rate.classList.toggle("on", r !== 1);
     }
+    function renderQuality() {
+      const w = video.videoWidth, hgt = video.videoHeight;
+      const label = resolutionLabel(w, hgt);
+      qB.hidden = !label;
+      qB.textContent = label;
+      qB.classList.toggle("hd", Math.min(w, hgt) >= 720 * 0.9);
+      const can = deps.quality.supported();
+      qB.classList.toggle("can", can);
+      const desc = `지금 ${w}×${hgt}로 재생 중(원본 그대로)`;
+      qB.title = can ? `${desc} · 클릭: 화질 바꾸기` : desc;
+      qB.setAttribute("aria-label", `화질 ${label}, ${w}×${hgt}`);
+      if (!qMenu.hidden) buildQualityMenu();
+    }
     const renderAll = () => {
       renderProgress();
       renderPlay();
       renderVolume();
       renderRate();
+      renderQuality();
     };
     let unbind = () => {
     };
@@ -791,7 +876,9 @@
         ["emptied", onMeta],
         ["playing", onMeta],
         ["volumechange", renderVolume],
-        ["ratechange", renderRate]
+        ["ratechange", renderRate],
+        ["resize", renderQuality],
+        ["loadeddata", renderQuality]
       ];
       on.forEach(([t, fn]) => v.addEventListener(t, fn));
       unbind = () => on.forEach(([t, fn]) => v.removeEventListener(t, fn));
@@ -802,6 +889,7 @@
     function onMeta() {
       refreshLive();
       renderProgress();
+      renderQuality();
     }
     let hideTimer = 0;
     function show() {
@@ -816,7 +904,7 @@
       win.clearTimeout(hideTimer);
       hideTimer = win.setTimeout(() => {
         const keyboard = doc.activeElement?.matches(":focus-visible") && doc.activeElement !== doc.body;
-        if (video.paused || dragging || pop.isOpen() || keyboard) return;
+        if (video.paused || dragging || pop.isOpen() || !qMenu.hidden || keyboard) return;
         visible = false;
         ov.classList.add("idle");
       }, HIDE_MS);
@@ -825,18 +913,20 @@
     stage.addEventListener("pointerdown", show);
     doc.addEventListener("focusin", show);
     doc.addEventListener("mouseout", (e) => {
-      if (e.relatedTarget || video.paused || dragging || pop.isOpen()) return;
+      if (e.relatedTarget || video.paused || dragging || pop.isOpen() || !qMenu.hidden) return;
       win.clearTimeout(hideTimer);
       visible = false;
       ov.classList.add("idle");
     });
     ov.addEventListener("click", (e) => {
       if (e.target !== ov && e.target !== mid) return;
-      if (pop.isOpen()) closePop();
-      else deps.run("play");
+      if (pop.isOpen() || !qMenu.hidden) {
+        closePop();
+        closeQuality();
+      } else deps.run("play");
     });
     stage.addEventListener("wheel", (e) => {
-      if (pop.root.contains(e.target)) return;
+      if (pop.root.contains(e.target) || qMenu.contains(e.target)) return;
       const d = e.deltaY || e.deltaX;
       if (!d) return;
       e.preventDefault();
@@ -895,15 +985,60 @@
       gear.setAttribute("aria-expanded", "false");
     }
     gear.addEventListener("click", () => {
+      closeQuality();
       pop.toggle();
       gear.setAttribute("aria-expanded", String(pop.isOpen()));
       show();
     });
+    function buildQualityMenu() {
+      const q = deps.quality;
+      const choice = q.choice();
+      const item = (label, value, sub) => h(doc, "button", {
+        class: "qi",
+        type: "button",
+        role: "menuitemradio",
+        "aria-checked": String(choice === value),
+        onclick: () => {
+          q.choose(value);
+          closeQuality();
+          show();
+        }
+      }, h(doc, "span", { text: label }), sub ? h(doc, "span", { class: "qsub", text: sub }) : null);
+      const levels = q.levels();
+      qMenu.replaceChildren(
+        h(doc, "div", { class: "qhead", text: `지금 ${video.videoWidth}×${video.videoHeight}` }),
+        item("최고 화질", "max", "항상"),
+        h(doc, "div", { class: "qsep" }),
+        ...levels.length ? levels.map((l) => item(l.label, l.id)) : [h(doc, "div", { class: "qhead", text: "화질 목록을 불러오는 중…" })],
+        h(doc, "div", { class: "qsep" }),
+        item("자동", "auto", "사이트에 맡김")
+      );
+    }
+    function closeQuality() {
+      qMenu.hidden = true;
+      qB.setAttribute("aria-expanded", "false");
+    }
+    qB.addEventListener("click", () => {
+      if (!deps.quality.supported()) return;
+      if (qMenu.hidden) {
+        closePop();
+        buildQualityMenu();
+        qMenu.hidden = false;
+        qB.setAttribute("aria-expanded", "true");
+      } else {
+        closeQuality();
+      }
+      show();
+    });
+    const unsubQuality = deps.config.subscribe(() => {
+      if (!qMenu.hidden) buildQualityMenu();
+    });
     doc.addEventListener("keydown", (e) => {
       show();
-      if (e.code === "Escape" && pop.isOpen()) {
+      if (e.code === "Escape" && (pop.isOpen() || !qMenu.hidden)) {
         e.preventDefault();
         closePop();
+        closeQuality();
         return;
       }
       deps.onKey(e);
@@ -927,6 +1062,7 @@
       destroy() {
         unbind();
         pop.destroy();
+        unsubQuality();
         win.clearTimeout(hideTimer);
       }
     };
@@ -967,7 +1103,7 @@
         () => config.siteDisabled(),
         (off) => config.setSiteDisabled(off)
       ),
-      h(doc, "div", { class: "ver", text: `v${"2.0.6"} · Alt+P로 언제든 켜고 끌 수 있어요` })
+      h(doc, "div", { class: "ver", text: `v${"2.1.0"} · Alt+P로 언제든 켜고 끌 수 있어요` })
     );
     const sync = () => opts.forEach((o) => o.el.setAttribute("aria-checked", String(o.get())));
     sync();
@@ -1230,6 +1366,18 @@
     id: "generic",
     title: () => document.title || location.hostname
   };
+  var YT_LABEL = {
+    highres: "4320p",
+    hd2880: "2880p",
+    hd2160: "2160p",
+    hd1440: "1440p",
+    hd1080: "1080p",
+    hd720: "720p",
+    large: "480p",
+    medium: "360p",
+    small: "240p",
+    tiny: "144p"
+  };
   var ytPlayer = () => document.getElementById("movie_player");
   var ownerPlayer = (home) => home?.closest?.(".html5-video-player") ?? ytPlayer();
   var isShorts = () => location.pathname.startsWith("/shorts");
@@ -1306,6 +1454,40 @@
       } catch {
         return false;
       }
+    },
+    qualityLevels(home) {
+      const p = ownerPlayer(home);
+      const out = [];
+      const add = (id, label) => {
+        if (!id || id === "auto" || out.some((q) => q.id === id)) return;
+        out.push({ id, label: label || YT_LABEL[id] || id });
+      };
+      try {
+        const data = p?.getAvailableQualityData?.();
+        if (Array.isArray(data) && data.length) {
+          for (const d of data) if (d && d.isPlayable !== false) add(d.quality, d.qualityLabel);
+        } else {
+          for (const id of p?.getAvailableQualityLevels?.() ?? []) add(id, void 0);
+        }
+      } catch {
+      }
+      return out;
+    },
+    setQuality(home, id) {
+      const p = ownerPlayer(home);
+      if (typeof p?.setPlaybackQualityRange !== "function" && typeof p?.setPlaybackQuality !== "function") return false;
+      let ok = false;
+      try {
+        p.setPlaybackQualityRange?.(id, id);
+        ok = true;
+      } catch {
+      }
+      try {
+        p.setPlaybackQuality?.(id);
+        ok = true;
+      } catch {
+      }
+      return ok;
     }
   };
   function pickAdapter(loc) {
@@ -1382,7 +1564,7 @@
   function boot() {
     const w = window;
     if (w.__videoPip) return;
-    w.__videoPip = "2.0.6";
+    w.__videoPip = "2.1.0";
     const top = isTopFrame();
     const adapter = pickAdapter(location);
     const local = safeLocalStorage();
@@ -1420,7 +1602,8 @@
           isLive: (x) => adapter.isLive?.(x) ?? isLive(x),
           toLiveEdge: (x) => {
             if (!adapter.toLiveEdge?.(x)) toLiveEdge(x);
-          }
+          },
+          quality
         });
         win.addEventListener("resize", () => {
           const edge = Math.max(win.innerWidth, win.innerHeight);
@@ -1434,6 +1617,10 @@
         }
         for (const type of ["emptied", "pause", "ended"]) win.document.addEventListener(type, scheduleRebind, true);
         keepAlive.attach(win.document);
+        quality.loaded(true);
+        win.document.addEventListener("loadstart", () => quality.loaded(), true);
+        for (const type of ["loadedmetadata", "playing", "resize"]) win.document.addEventListener(type, () => quality.ensure(), true);
+        setTimeout(() => quality.ensure(), 0);
         return ui;
       },
       legacyAvailable: (v) => document.pictureInPictureEnabled && !v.disablePictureInPicture,
@@ -1456,6 +1643,10 @@
     });
     const keymap = createKeymap(buildCommands(session));
     const keepAlive = startKeepAlive(session, adapter);
+    const quality = createQuality(adapter, config, () => session.home(), () => {
+      const v = session.video();
+      return adapter.videoId?.(session.home()) ?? v?.currentSrc ?? null;
+    });
     window.addEventListener("keydown", (e) => keymap.handle(e, "global"), true);
     let rebindTimer;
     function scheduleRebind() {

@@ -4,6 +4,7 @@ import type { CommandId } from './commands';
 import type { ConfigStore } from './config';
 import { adoptCss, h, icon } from './dom';
 import * as media from './media';
+import { resolutionLabel, type QualityControl } from './quality';
 import type { MountedUI } from './session';
 import { clamp, fmtTime } from './util';
 
@@ -17,6 +18,7 @@ export interface PlayerDeps {
   /** 라이브인가(사이트 어댑터 판정 포함) */
   isLive(v: HTMLVideoElement): boolean;
   toLiveEdge(v: HTMLVideoElement): void;
+  quality: QualityControl;
 }
 
 const HIDE_MS = 2400;
@@ -56,12 +58,15 @@ export function mountPlayerUI(win: Window, first: HTMLVideoElement, deps: Player
   const muteB = btn('ib mute', 'mute', 'volume');
   const vol = h(doc, 'input', { class: 'vol', type: 'range', min: '0', max: '100', step: '1', 'aria-label': '볼륨' });
   const rate = h(doc, 'button', { class: 'rate', type: 'button', title: '배속 (클릭: 바꾸기 · [ / ] / =)', 'aria-label': '배속', onclick: () => deps.run('rateCycle') });
-  const row = h(doc, 'div', { class: 'row' }, playB, time, liveB, h(doc, 'span', { class: 'grow' }), muteB, vol, rate);
+  // 화질: 지금 실제로 재생 중인 해상도. 바꿀 수 있는 사이트면 누르면 바로 화질 목록
+  const qB = h(doc, 'button', { class: 'q', type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false' });
+  const row = h(doc, 'div', { class: 'row' }, playB, time, liveB, h(doc, 'span', { class: 'grow' }), muteB, vol, qB, rate);
   const bot = h(doc, 'div', { class: 'bot' }, seek, row);
 
   const ov = h(doc, 'div', { class: 'ov' }, top, mid, bot);
   const pop = buildPopover(doc, deps.config);
-  const stage = h(doc, 'div', { class: 'stage' }, slot, ov, pop.root);
+  const qMenu = h(doc, 'div', { class: 'qmenu', role: 'menu', 'aria-label': '화질', hidden: true });
+  const stage = h(doc, 'div', { class: 'stage' }, slot, ov, pop.root, qMenu);
   doc.body.append(stage);
 
   // ── 표시 갱신 ──
@@ -110,7 +115,20 @@ export function mountPlayerUI(win: Window, first: HTMLVideoElement, deps: Player
     rate.textContent = `${Number(r.toFixed(2))}x`;
     rate.classList.toggle('on', r !== 1);
   }
-  const renderAll = () => { renderProgress(); renderPlay(); renderVolume(); renderRate(); };
+  function renderQuality(): void {
+    const w = video.videoWidth, hgt = video.videoHeight;
+    const label = resolutionLabel(w, hgt);
+    qB.hidden = !label;
+    qB.textContent = label;
+    qB.classList.toggle('hd', Math.min(w, hgt) >= 720 * 0.9);
+    const can = deps.quality.supported();
+    qB.classList.toggle('can', can);
+    const desc = `지금 ${w}×${hgt}로 재생 중(원본 그대로)`;
+    qB.title = can ? `${desc} · 클릭: 화질 바꾸기` : desc;
+    qB.setAttribute('aria-label', `화질 ${label}, ${w}×${hgt}`);
+    if (!qMenu.hidden) buildQualityMenu();
+  }
+  const renderAll = () => { renderProgress(); renderPlay(); renderVolume(); renderRate(); renderQuality(); };
 
   // ── 영상 이벤트 ──
   let unbind: () => void = () => {};
@@ -122,6 +140,7 @@ export function mountPlayerUI(win: Window, first: HTMLVideoElement, deps: Player
       ['progress', () => visible && renderProgress()],
       ['durationchange', onMeta], ['loadedmetadata', onMeta], ['emptied', onMeta], ['playing', onMeta],
       ['volumechange', renderVolume], ['ratechange', renderRate],
+      ['resize', renderQuality], ['loadeddata', renderQuality],
     ];
     on.forEach(([t, fn]) => v.addEventListener(t, fn));
     unbind = () => on.forEach(([t, fn]) => v.removeEventListener(t, fn));
@@ -132,6 +151,7 @@ export function mountPlayerUI(win: Window, first: HTMLVideoElement, deps: Player
   function onMeta(): void {
     refreshLive();
     renderProgress();
+    renderQuality();
   }
 
   // ── 보이기 / 숨기기 ──
@@ -144,7 +164,7 @@ export function mountPlayerUI(win: Window, first: HTMLVideoElement, deps: Player
     win.clearTimeout(hideTimer);
     hideTimer = win.setTimeout(() => {
       const keyboard = doc.activeElement?.matches(':focus-visible') && doc.activeElement !== doc.body;
-      if (video.paused || dragging || pop.isOpen() || keyboard) return;
+      if (video.paused || dragging || pop.isOpen() || !qMenu.hidden || keyboard) return;
       visible = false;
       ov.classList.add('idle');
     }, HIDE_MS);
@@ -153,7 +173,7 @@ export function mountPlayerUI(win: Window, first: HTMLVideoElement, deps: Player
   stage.addEventListener('pointerdown', show);
   doc.addEventListener('focusin', show);
   doc.addEventListener('mouseout', (e) => { // 포인터가 창 밖으로 나가면 바로 숨김
-    if (e.relatedTarget || video.paused || dragging || pop.isOpen()) return;
+    if (e.relatedTarget || video.paused || dragging || pop.isOpen() || !qMenu.hidden) return;
     win.clearTimeout(hideTimer);
     visible = false;
     ov.classList.add('idle');
@@ -162,13 +182,13 @@ export function mountPlayerUI(win: Window, first: HTMLVideoElement, deps: Player
   // 빈 곳 클릭 = 재생/일시정지 (팝오버가 열려 있으면 닫기만)
   ov.addEventListener('click', (e) => {
     if (e.target !== ov && e.target !== mid) return;
-    if (pop.isOpen()) closePop();
+    if (pop.isOpen() || !qMenu.hidden) { closePop(); closeQuality(); }
     else deps.run('play');
   });
 
   // 휠 = 볼륨, Shift+휠 = 배속 (Windows는 Shift+휠이 가로 스크롤로 와서 deltaX도 본다)
   stage.addEventListener('wheel', (e) => {
-    if (pop.root.contains(e.target as Node)) return;
+    if (pop.root.contains(e.target as Node) || qMenu.contains(e.target as Node)) return;
     const d = e.deltaY || e.deltaX;
     if (!d) return;
     e.preventDefault();
@@ -223,17 +243,57 @@ export function mountPlayerUI(win: Window, first: HTMLVideoElement, deps: Player
     gear.setAttribute('aria-expanded', 'false');
   }
   gear.addEventListener('click', () => {
+    closeQuality();
     pop.toggle();
     gear.setAttribute('aria-expanded', String(pop.isOpen()));
     show();
   });
 
+  // ── 화질 메뉴 ──
+  function buildQualityMenu(): void {
+    const q = deps.quality;
+    const choice = q.choice();
+    const item = (label: string, value: string, sub?: string) => h(doc, 'button', {
+      class: 'qi', type: 'button', role: 'menuitemradio', 'aria-checked': String(choice === value),
+      onclick: () => { q.choose(value); closeQuality(); show(); },
+    }, h(doc, 'span', { text: label }), sub ? h(doc, 'span', { class: 'qsub', text: sub }) : null);
+    const levels = q.levels();
+    qMenu.replaceChildren(
+      h(doc, 'div', { class: 'qhead', text: `지금 ${video.videoWidth}×${video.videoHeight}` }),
+      item('최고 화질', 'max', '항상'),
+      h(doc, 'div', { class: 'qsep' }),
+      ...(levels.length
+        ? levels.map((l) => item(l.label, l.id))
+        : [h(doc, 'div', { class: 'qhead', text: '화질 목록을 불러오는 중…' })]),
+      h(doc, 'div', { class: 'qsep' }),
+      item('자동', 'auto', '사이트에 맡김'),
+    );
+  }
+  function closeQuality(): void {
+    qMenu.hidden = true;
+    qB.setAttribute('aria-expanded', 'false');
+  }
+  qB.addEventListener('click', () => {
+    if (!deps.quality.supported()) return;
+    if (qMenu.hidden) {
+      closePop();
+      buildQualityMenu();
+      qMenu.hidden = false;
+      qB.setAttribute('aria-expanded', 'true');
+    } else {
+      closeQuality();
+    }
+    show();
+  });
+  const unsubQuality = deps.config.subscribe(() => { if (!qMenu.hidden) buildQualityMenu(); });
+
   // ── 단축키 ──
   doc.addEventListener('keydown', (e) => {
     show();
-    if (e.code === 'Escape' && pop.isOpen()) {
+    if (e.code === 'Escape' && (pop.isOpen() || !qMenu.hidden)) {
       e.preventDefault();
       closePop();
+      closeQuality();
       return;
     }
     deps.onKey(e);
@@ -258,6 +318,7 @@ export function mountPlayerUI(win: Window, first: HTMLVideoElement, deps: Player
     destroy() {
       unbind();
       pop.destroy();
+      unsubQuality();
       win.clearTimeout(hideTimer);
     },
   };

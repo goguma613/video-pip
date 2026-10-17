@@ -12,6 +12,8 @@ export interface Config {
   disabledSites: string[];
   /** PiP 창 첫 진입 힌트를 보여 줬는지 */
   hinted: boolean;
+  /** 화질 선호: 사이트에 맡김(auto) / 영상마다 최고 화질(max). 화질 전환을 지원하는 사이트(유튜브)에서만 */
+  quality: 'auto' | 'max';
 }
 
 export const DEFAULTS: Readonly<Config> = {
@@ -21,6 +23,7 @@ export const DEFAULTS: Readonly<Config> = {
   launcher: true,
   disabledSites: [],
   hinted: false,
+  quality: 'auto',
 };
 
 export const LONG_EDGE_MIN = 240;
@@ -44,6 +47,7 @@ export function sanitize(raw: unknown): Config {
     launcher: bool(r.launcher, DEFAULTS.launcher),
     disabledSites: [...new Set(sites)].slice(0, 500),
     hinted: bool(r.hinted, DEFAULTS.hinted),
+    quality: r.quality === 'max' ? 'max' : 'auto',
   };
 }
 

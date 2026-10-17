@@ -1,5 +1,13 @@
 // 사이트 어댑터. v2.0은 일반 + 유튜브만 둔다.
 
+/** 사이트가 고를 수 있게 해 주는 화질 하나 */
+export interface QualityLevel {
+  /** 사이트 내부 이름(유튜브: hd1080 등) */
+  id: string;
+  /** 보여 줄 이름(1080p60 등) */
+  label: string;
+}
+
 export interface SiteAdapter {
   id: string;
   /** 사이트의 주 영상(있으면 점수 가산) */
@@ -26,6 +34,10 @@ export interface SiteAdapter {
   isLive?(v: HTMLVideoElement): boolean;
   /** 사이트 방식으로 실시간 위치로 이동했으면 true */
   toLiveEdge?(v: HTMLVideoElement): boolean;
+  /** 고를 수 있는 화질(높은 순). 아직 모르면 빈 배열 */
+  qualityLevels?(home: Node | null): QualityLevel[];
+  /** 화질 바꾸기: 화질 id 또는 'auto'(사이트에 맡김). 했으면 true */
+  setQuality?(home: Node | null, id: string): boolean;
 }
 
 const generic: SiteAdapter = {
@@ -34,11 +46,25 @@ const generic: SiteAdapter = {
 };
 
 // 유튜브 플레이어 객체(@grant none이라 페이지 JS에 접근 가능). 내부 API라 언제든 바뀔 수 있어 전부 방어적으로 쓴다.
+interface YtQualityData {
+  quality?: string;
+  qualityLabel?: string;
+  isPlayable?: boolean;
+}
 interface YtPlayer extends HTMLElement {
   getVideoData?(): { isLive?: boolean; video_id?: string } | undefined;
   seekToLiveHead?(): void;
   loadVideoById?(id: string, startSeconds?: number): void;
+  getAvailableQualityData?(): YtQualityData[] | undefined;
+  getAvailableQualityLevels?(): string[] | undefined;
+  setPlaybackQualityRange?(min: string, max?: string): void;
+  setPlaybackQuality?(q: string): void;
 }
+// 유튜브 화질 이름 → 보여 줄 이름(getAvailableQualityData가 없을 때)
+const YT_LABEL: Record<string, string> = {
+  highres: '4320p', hd2880: '2880p', hd2160: '2160p', hd1440: '1440p', hd1080: '1080p',
+  hd720: '720p', large: '480p', medium: '360p', small: '240p', tiny: '144p',
+};
 const ytPlayer = () => document.getElementById('movie_player') as YtPlayer | null;
 /** 영상의 원래 자리가 속한 플레이어(일반 / 쇼츠 / 미리보기 중 정확히 그 영상의 것) */
 const ownerPlayer = (home: Node | null) =>
@@ -101,6 +127,31 @@ const youtube: SiteAdapter = {
     const p = ytPlayer();
     if (typeof p?.seekToLiveHead !== 'function') return false;
     try { p.seekToLiveHead(); return true; } catch { return false; }
+  },
+  qualityLevels(home) {
+    const p = ownerPlayer(home);
+    const out: QualityLevel[] = [];
+    const add = (id: string | undefined, label: string | undefined) => {
+      if (!id || id === 'auto' || out.some((q) => q.id === id)) return;
+      out.push({ id, label: label || YT_LABEL[id] || id });
+    };
+    try {
+      const data = p?.getAvailableQualityData?.();
+      if (Array.isArray(data) && data.length) {
+        for (const d of data) if (d && d.isPlayable !== false) add(d.quality, d.qualityLabel);
+      } else {
+        for (const id of p?.getAvailableQualityLevels?.() ?? []) add(id, undefined);
+      }
+    } catch { /* API 변경 */ }
+    return out; // 유튜브는 높은 화질부터 준다
+  },
+  setQuality(home, id) {
+    const p = ownerPlayer(home);
+    if (typeof p?.setPlaybackQualityRange !== 'function' && typeof p?.setPlaybackQuality !== 'function') return false;
+    let ok = false;
+    try { p.setPlaybackQualityRange?.(id, id); ok = true; } catch { /* 무시 */ }
+    try { p.setPlaybackQuality?.(id); ok = true; } catch { /* 무시 */ }
+    return ok;
   },
 };
 

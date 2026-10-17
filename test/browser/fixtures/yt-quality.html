@@ -1,0 +1,30 @@
+<!doctype html><html><head><meta charset="utf-8"><title>화질 테스트 - YouTube</title>
+<style>#movie_player{position:relative;width:854px;height:480px;background:#000}.html5-video-container{position:relative;width:100%;height:100%}video.html5-main-video{position:absolute}</style></head><body>
+<div id="movie_player" class="html5-video-player"><div class="html5-video-container">
+<video class="video-stream html5-main-video" src="/land.webm" autoplay loop style="width:854px;height:480px;left:0;top:0"></video></div></div>
+<script>
+  // 유튜브 플레이어의 화질 API 흉내: 화질을 바꾸면 실제 해상도가 바뀐다(tiny=320×180, medium=640×360)
+  const v = document.querySelector('video');
+  window.watchVideo = v;
+  window.__q = [];
+  const SRC = { medium: '/hd.webm', tiny: '/land.webm' };
+  let cur = 'tiny';
+  const mp = document.getElementById('movie_player');
+  mp.getVideoData = () => ({ video_id: 'qvid' });
+  mp.getAvailableQualityData = () => [
+    { quality: 'medium', qualityLabel: '360p', isPlayable: true },
+    { quality: 'small', qualityLabel: '240p Premium', isPlayable: false },
+    { quality: 'tiny', qualityLabel: '180p', isPlayable: true },
+    { quality: 'auto', qualityLabel: 'auto', isPlayable: true },
+  ];
+  mp.getPlaybackQuality = () => cur;
+  mp.setPlaybackQualityRange = (min) => {
+    window.__q.push(min);
+    const id = min === 'auto' ? 'tiny' : min;
+    if (id === cur || !SRC[id]) return;
+    cur = id;
+    const t = v.currentTime;
+    v.src = SRC[id];
+    v.addEventListener('loadedmetadata', () => { v.currentTime = Math.min(t, v.duration - 1); v.play(); }, { once: true });
+  };
+</script></body></html>
